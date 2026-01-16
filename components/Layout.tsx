@@ -18,19 +18,23 @@ export const NedaLogo: React.FC<{ size?: number; className?: string }> = ({ size
     xmlns="http://www.w3.org/2000/svg"
     className={className}
   >
-    {/* Geometric "n" parts exactly as per the close-up image */}
-    {/* Top left orange square */}
-    <path d="M15 10H43V38H15V10Z" fill="#D15433" />
-    
-    {/* Bottom left orange pillar with curved outer side */}
-    <path d="M15 90V54C15 45.1634 22.1634 38 31 38H43V90H15Z" fill="#D15433" />
-    
-    {/* Right orange arch pillar */}
-    <path d="M43 38V10C70.6142 10 93 32.3858 93 60V90H65V60C65 47.85 55.15 38 43 38Z" fill="#D15433" />
-    
-    {/* Refined Navy Blue Accents strictly following the image placement */}
-    <path d="M15 90V54C15 45.1634 22.1634 38 31 38" stroke="#142948" strokeWidth="4" strokeLinecap="butt" />
-    <path d="M65 38V90" stroke="#142948" strokeWidth="4" strokeLinecap="butt" />
+    {/* Geometric "n" parts exactly as supplied */}
+    <g transform="translate(10, 10) scale(0.85)">
+      {/* Top left orange square */}
+      <path d="M12 10H41V38H12V10Z" fill="#D15433" />
+      
+      {/* Bottom left orange pillar with curved outer side */}
+      <path d="M12 90V54C12 45.1634 19.1634 38 28 38H41V90H12Z" fill="#D15433" />
+      
+      {/* Right orange arch pillar */}
+      <path d="M41 38V10C68.6142 10 91 32.3858 91 60V90H63V60C63 47.85 53.15 38 41 38Z" fill="#D15433" />
+      
+      {/* Navy blue accents strictly as per image placement */}
+      {/* Left curve accent */}
+      <path d="M12 90V54C12 45.1634 19.1634 38 28 38" stroke="#142948" strokeWidth="6" strokeLinecap="butt" fill="none" />
+      {/* Middle vertical accent */}
+      <path d="M63 38V90" stroke="#142948" strokeWidth="6" strokeLinecap="butt" fill="none" />
+    </g>
   </svg>
 );
 
