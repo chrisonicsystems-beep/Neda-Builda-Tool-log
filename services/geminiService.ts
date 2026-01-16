@@ -2,6 +2,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { Tool } from "../types";
 
+// Analyze tools using the text-focused model
 export const analyzeTools = async (tools: Tool[], query: string): Promise<string> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
@@ -36,6 +37,7 @@ export const analyzeTools = async (tools: Tool[], query: string): Promise<string
       model: 'gemini-3-flash-preview',
       contents: prompt,
     });
+    // Property access for text as per guidelines
     return response.text || "Sorry, I couldn't analyze the data right now.";
   } catch (error) {
     console.error("Gemini Analysis Error:", error);
@@ -43,13 +45,14 @@ export const analyzeTools = async (tools: Tool[], query: string): Promise<string
   }
 };
 
+// Search for addresses using Google Maps grounding
 export const searchAddresses = async (query: string): Promise<string[]> => {
   if (!query || query.length < 3) return [];
   
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   try {
-    // Using Gemini 2.5 for Maps grounding capabilities
+    // Maps grounding is only supported in Gemini 2.5 series models
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
       contents: `Find 5 real world construction site addresses or locations in New Zealand (or general addresses) matching: "${query}". Return only a list of the plain text addresses, one per line. No extra text.`,
@@ -58,6 +61,7 @@ export const searchAddresses = async (query: string): Promise<string[]> => {
       },
     });
 
+    // Property access for text as per guidelines
     const text = response.text || "";
     // Clean up lines: remove numbering, empty lines, etc.
     return text
