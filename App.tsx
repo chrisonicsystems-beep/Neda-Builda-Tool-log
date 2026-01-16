@@ -334,7 +334,6 @@ const InventoryView: React.FC<{
           tools.map(tool => ( <ToolCard key={tool.id} tool={tool} onClick={() => setSelectedTool(tool)} /> ))
         )}
       </div>
-      {/* Fix: Added async/await to onUpdate and onAdd callbacks to satisfy Promise<void> type requirement */}
       {selectedTool && <ToolModal tool={selectedTool} onClose={() => setSelectedTool(null)} currentUser={currentUser} onUpdate={async (t) => { await onUpdateTool(t); setSelectedTool(null); }} />}
       {showAddModal && <AddToolModal onClose={() => setShowAddModal(false)} onAdd={async (t) => { await onAddTool(t); setShowAddModal(false); }} currentUser={currentUser} />}
     </div>
@@ -361,7 +360,6 @@ const MyToolsView: React.FC<{ tools: Tool[]; currentUser: User; onUpdateTool: (t
           tools.map(tool => ( <ToolCard key={tool.id} tool={tool} onClick={() => setSelectedTool(tool)} /> ))
         )}
       </div>
-      {/* Fix: Added async/await to onUpdate callback to satisfy Promise<void> type requirement */}
       {selectedTool && <ToolModal tool={selectedTool} onClose={() => setSelectedTool(null)} currentUser={currentUser} onUpdate={async (t) => { await onUpdateTool(t); setSelectedTool(null); }} />}
     </div>
   );
@@ -489,7 +487,8 @@ const AdminDashboard: React.FC<{
                   <div className="mt-3 pt-3 border-t border-slate-50 flex items-center justify-between">
                     <div className="flex items-center gap-2">
                        <Lock size={12} className="text-slate-300" />
-                       <span className="text-[10px] font-mono font-bold text-neda-navy/40 uppercase tracking-widest">
+                       {/* FIXED: Removed 'uppercase' and 'tracking-widest' to preserve true password casing */}
+                       <span className="text-[10px] font-mono font-bold text-neda-navy/40">
                          {showPasswords[user.id] ? user.password : '••••••••'}
                        </span>
                     </div>
@@ -503,7 +502,6 @@ const AdminDashboard: React.FC<{
         </div>
       )}
 
-      {/* Fix: Added async/await to onAdd and onUpdate callbacks to satisfy Promise<void> type requirement */}
       {showUserModal && <AddUserModal onClose={() => setShowUserModal(false)} onAdd={async (u) => { await onAddUser(u); setShowUserModal(false); }} />}
       {editingUser && <EditUserModal user={editingUser} onClose={() => setEditingUser(null)} onUpdate={async (u) => { await onUpdateUser(u); setEditingUser(null); }} />}
     </div>
