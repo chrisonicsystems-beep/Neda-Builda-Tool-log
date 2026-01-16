@@ -2,8 +2,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { Tool, User } from '../types';
 
-// These process.env variables are replaced by string literals during the Vite build process.
-// If they are empty strings here, it means the build-time environment was missing them.
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
 
@@ -12,14 +10,9 @@ export const supabase = (supabaseUrl && supabaseAnonKey && supabaseUrl !== '' &&
   : null;
 
 if (!supabase) {
-  console.warn(
-    "Supabase Client: Missing Credentials.\n" +
-    "1. Ensure SUPABASE_URL and SUPABASE_ANON_KEY are set in Vercel Environment Variables.\n" +
-    "2. You MUST trigger a 'Redeploy' in Vercel after adding variables to bake them into the build."
-  );
+  console.warn("Supabase Client: Missing Credentials. Please check Vercel environment variables.");
 }
 
-// Helper to map JS User to DB User (handling camelCase -> snake_case)
 const mapUserToDb = (user: User) => ({
   id: user.id,
   name: user.name,
@@ -68,42 +61,48 @@ const mapDbToTool = (dbTool: any): Tool => ({
   logs: dbTool.logs || []
 });
 
-export const syncTools = async (tools: Tool[]) => {
-  if (!supabase) throw new Error("Supabase client not initialized");
-  const dbTools = tools.map(mapToolToDb);
-  const { error } = await supabase.from('tools').upsert(dbTools);
+export const upsertSingleTool = async (tool: Tool) => {
+  if (!supabase) return;
+  const { error } = await supabase.from('tools').upsert(mapToolToDb(tool));
   if (error) {
-    console.error('Error syncing tools:', error);
+    if (error.code === '23505') throw new Error(`Asset with this ID or Serial already exists.`);
     throw error;
   }
+};
+
+export const upsertSingleUser = async (user: User) => {
+  if (!supabase) return;
+  const { error } = await supabase.from('users').upsert(mapUserToDb(user));
+  if (error) {
+    if (error.code === '23505') throw new Error(`Personnel with this Email already exists.`);
+    throw error;
+  }
+};
+
+export const syncTools = async (tools: Tool[]) => {
+  if (!supabase) return;
+  const dbTools = tools.map(mapToolToDb);
+  const { error } = await supabase.from('tools').upsert(dbTools);
+  if (error) throw error;
 };
 
 export const fetchTools = async (): Promise<Tool[] | null> => {
   if (!supabase) return null;
   const { data, error } = await supabase.from('tools').select('*');
-  if (error) {
-    console.error('Error fetching tools:', error);
-    return null;
-  }
+  if (error) return null;
   return data.map(mapDbToTool);
 };
 
 export const syncUsers = async (users: User[]) => {
-  if (!supabase) throw new Error("Supabase client not initialized");
+  if (!supabase) return;
   const dbUsers = users.map(mapUserToDb);
   const { error } = await supabase.from('users').upsert(dbUsers);
-  if (error) {
-    console.error('Error syncing users:', error);
-    throw error;
-  }
+  if (error) throw error;
 };
 
 export const fetchUsers = async (): Promise<User[] | null> => {
   if (!supabase) return null;
   const { data, error } = await supabase.from('users').select('*');
-  if (error) {
-    console.error('Error fetching users:', error);
-    return null;
-  }
+  if (error) return null;
   return data.map(mapDbToUser);
 };

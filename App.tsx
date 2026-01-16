@@ -44,7 +44,7 @@ import {
   WifiOff
 } from 'lucide-react';
 import { analyzeTools, searchAddresses } from './services/geminiService';
-import { fetchTools, fetchUsers, syncTools, syncUsers, supabase } from './services/supabaseService';
+import { fetchTools, fetchUsers, syncTools, syncUsers, upsertSingleTool, upsertSingleUser, supabase } from './services/supabaseService';
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -112,28 +112,27 @@ const App: React.FC = () => {
   };
 
   const updateTool = async (updatedTool: Tool) => {
-    const newTools = tools.map(t => t.id === updatedTool.id ? updatedTool : t);
-    setTools(newTools);
+    setTools(prev => prev.map(t => t.id === updatedTool.id ? updatedTool : t));
     setIsSyncing(true);
     try {
-      await syncTools(newTools);
+      await upsertSingleTool(updatedTool);
       setSyncError(null);
     } catch (e: any) {
-      setSyncError(`Sync Error: ${e.message}`);
+      setSyncError(e.message || "Update Failed");
     } finally {
       setIsSyncing(false);
     }
   };
 
   const addTool = async (newTool: Tool) => {
-    const newTools = [...tools, newTool];
-    setTools(newTools);
+    setTools(prev => [...prev, newTool]);
     setIsSyncing(true);
     try {
-      await syncTools(newTools);
+      await upsertSingleTool(newTool);
       setSyncError(null);
     } catch (e: any) {
-      setSyncError(`Sync Error: ${e.message}`);
+      setSyncError(e.message || "Registration Failed");
+      // Rollback UI state on error if needed, but usually simpler to just let user fix it
     } finally {
       setIsSyncing(false);
     }
@@ -147,39 +146,35 @@ const App: React.FC = () => {
       await syncTools(updatedTools);
       setSyncError(null);
     } catch (e: any) {
-      setSyncError(`Sync Error: ${e.message}`);
+      setSyncError(`Bulk Sync Error: ${e.message}`);
     } finally {
       setIsSyncing(false);
     }
   };
   
   const updateUser = async (updatedUser: User) => {
-    const newUsers = allUsers.map(u => u.id === updatedUser.id ? updatedUser : u);
-    setAllUsers(newUsers);
+    setAllUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
     if (currentUser?.id === updatedUser.id) setCurrentUser(updatedUser);
     setIsSyncing(true);
     try {
-      await syncUsers(newUsers);
+      await upsertSingleUser(updatedUser);
       setSyncError(null);
     } catch (e: any) {
-      setSyncError(`Sync Error: ${e.message}`);
+      setSyncError(e.message || "Personnel Update Failed");
     } finally {
       setIsSyncing(false);
     }
   };
 
   const addUser = async (newUser: User) => {
-    const newUsers = [...allUsers, newUser];
-    setAllUsers(newUsers);
     setIsSyncing(true);
     try {
-      if (!supabase) throw new Error("Supabase is not connected. Check your environment variables.");
-      await syncUsers(newUsers);
+      await upsertSingleUser(newUser);
+      setAllUsers(prev => [...prev, newUser]);
       setSyncError(null);
-      console.log("User successfully added to Supabase");
     } catch (e: any) {
-      console.error("Add user failed:", e);
-      setSyncError(`Database Error: ${e.message || "Unknown error"}`);
+      setSyncError(e.message || "Registration Failed");
+      throw e; // Rethrow so modal doesn't close
     } finally {
       setIsSyncing(false);
     }
@@ -211,22 +206,22 @@ const App: React.FC = () => {
   return (
     <Layout activeView={view} setView={setView} userRole={currentUser.role} onLogout={handleLogout}>
       {/* Global Sync/Connection Indicator */}
-      <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[100] pointer-events-none">
+      <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[100] w-full max-w-xs pointer-events-none px-4">
         {!supabase ? (
-           <div className="bg-amber-500 text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 animate-in slide-in-from-top-4">
+           <div className="bg-amber-500 text-white px-4 py-2 rounded-2xl shadow-lg flex items-center justify-center gap-2 animate-in slide-in-from-top-4">
             <WifiOff size={12} />
-            <span className="text-[8px] font-black uppercase tracking-widest">Supabase Disconnected (Offline Mode)</span>
+            <span className="text-[8px] font-black uppercase tracking-widest">Offline Mode</span>
           </div>
         ) : isSyncing ? (
-          <div className="bg-neda-navy text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 animate-in slide-in-from-top-4">
+          <div className="bg-neda-navy text-white px-4 py-2 rounded-2xl shadow-lg flex items-center justify-center gap-2 animate-in slide-in-from-top-4">
             <Loader2 className="animate-spin" size={12} />
-            <span className="text-[8px] font-black uppercase tracking-widest">Syncing to Cloud...</span>
+            <span className="text-[8px] font-black uppercase tracking-widest">Syncing...</span>
           </div>
         ) : syncError ? (
-          <div className="bg-red-500 text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 animate-in slide-in-from-top-4">
-            <AlertTriangle size={12} />
-            <span className="text-[8px] font-black uppercase tracking-widest truncate max-w-[200px]">{syncError}</span>
-            <button onClick={() => setSyncError(null)} className="pointer-events-auto ml-1 bg-white/20 p-1 rounded-full"><X size={8} /></button>
+          <div className="bg-red-500 text-white px-4 py-3 rounded-2xl shadow-xl flex items-center gap-3 animate-in slide-in-from-top-4 pointer-events-auto">
+            <AlertTriangle size={16} className="shrink-0" />
+            <span className="text-[9px] font-black uppercase tracking-widest leading-tight flex-1">{syncError}</span>
+            <button onClick={() => setSyncError(null)} className="p-1 bg-white/20 rounded-lg"><X size={10} /></button>
           </div>
         ) : null}
       </div>
@@ -514,8 +509,13 @@ const AddUserModal: React.FC<{ onClose: () => void; onAdd: (u: User) => Promise<
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    await onAdd({ id: 'U' + Math.random().toString(36).substr(2, 5).toUpperCase(), name, email, role, password, isEnabled: true });
-    setLoading(false);
+    try {
+      await onAdd({ id: 'U' + Math.random().toString(36).substr(2, 5).toUpperCase(), name, email, role, password, isEnabled: true });
+    } catch (e) {
+      // Keep modal open if sync failed
+    } finally {
+      setLoading(false);
+    }
   };
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-neda-navy/60 backdrop-blur-sm p-4 animate-in fade-in">
@@ -707,15 +707,20 @@ const AddToolModal: React.FC<{ onClose: () => void; onAdd: (t: Tool) => Promise<
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    await onAdd({ 
-      id: 'T' + Math.random().toString(36).substr(2, 5).toUpperCase(), 
-      name, 
-      category, 
-      serialNumber: serial, 
-      status: ToolStatus.AVAILABLE, 
-      logs: [{ id: 'L1', userId: currentUser.id, userName: currentUser.name, action: 'CREATE', timestamp: Date.now() }] 
-    });
-    setLoading(false);
+    try {
+      await onAdd({ 
+        id: 'T' + Math.random().toString(36).substr(2, 5).toUpperCase(), 
+        name, 
+        category, 
+        serialNumber: serial, 
+        status: ToolStatus.AVAILABLE, 
+        logs: [{ id: 'L' + Date.now(), userId: currentUser.id, userName: currentUser.name, action: 'CREATE', timestamp: Date.now() }] 
+      });
+    } catch (e) {
+      // Keep modal open on error
+    } finally {
+      setLoading(false);
+    }
   };
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-neda-navy/60 backdrop-blur-sm p-4 animate-in fade-in">
