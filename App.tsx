@@ -37,7 +37,7 @@ import {
   Download,
   Upload,
   FileText,
-  ImageIcon,
+  Image as ImageIcon,
   Clock,
   Fingerprint
 } from 'lucide-react';
@@ -62,15 +62,24 @@ const App: React.FC = () => {
   // App initialization
   useEffect(() => {
     const initData = async () => {
-      // 1. Try Shared Backend
+      // 1. Try Shared Backend (Supabase)
       const remoteTools = await fetchTools();
       const remoteUsers = await fetchUsers();
 
       if (remoteTools && remoteUsers) {
-        setTools(remoteTools);
-        setAllUsers(remoteUsers);
+        // If DB exists but is empty, seed it for the client
+        if (remoteTools.length === 0 && remoteUsers.length === 0) {
+          console.log("Database empty. Seeding demo data...");
+          setTools(INITIAL_TOOLS);
+          setAllUsers(INITIAL_USERS);
+          await syncTools(INITIAL_TOOLS);
+          await syncUsers(INITIAL_USERS);
+        } else {
+          setTools(remoteTools);
+          setAllUsers(remoteUsers);
+        }
       } else {
-        // 2. Fallback to Local Storage
+        // 2. Fallback to Local Storage if Supabase is not configured
         const savedTools = localStorage.getItem('et_tools');
         setTools(savedTools ? JSON.parse(savedTools) : INITIAL_TOOLS);
 
@@ -123,7 +132,7 @@ const App: React.FC = () => {
     if (!currentUser) return;
     localStorage.setItem(`bio_${currentUser.id}`, 'enabled');
     setShowBiometricPrompt(false);
-    alert("Biometrics enabled for this device.");
+    alert("FaceID enabled for this device.");
   };
 
   const updateTool = (updatedTool: Tool) => {
