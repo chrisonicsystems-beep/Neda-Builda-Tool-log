@@ -1,0 +1,7 @@
+{
+  "name": "Tool Log",
+  "description": "A mobile-first tool and equipment tracking system for managing company assets, bookings, and returns with AI-powered insights.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
