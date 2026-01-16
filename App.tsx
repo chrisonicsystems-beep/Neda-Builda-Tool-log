@@ -200,8 +200,12 @@ const App: React.FC = () => {
   }, [tools, searchTerm, statusFilter, userFilter]);
 
   if (isInitializing) return (
-    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6">
-      <NedaLogo size={80} className="animate-pulse mb-6" />
+    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
+      <img 
+        src="https://lirp.cdn-website.com/f1362e52/dms3rep/multi/opt/png_Primary-logo-navy-wording--no-bg-04029866-296w.png"
+        alt="Neda Builda"
+        className="w-full max-w-[280px] animate-pulse mb-8"
+      />
       <div className="flex items-center gap-2 text-neda-navy font-black uppercase text-[10px] tracking-widest">
          <Loader2 className="animate-spin" size={16} />
          <span>Connecting to Chrisonic Network...</span>
@@ -284,12 +288,14 @@ const LoginScreen: React.FC<{
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6">
       <div className="w-full max-w-sm bg-white rounded-[2.5rem] p-8 space-y-8 shadow-2xl border border-slate-100">
-        <div className="text-center space-y-3">
-          <NedaLogo size={100} className="mx-auto" />
-          <h1 className="text-neda-navy font-bold text-4xl tracking-tight">Neda Builda</h1>
-          <p className="text-sm font-semibold text-neda-navy tracking-tight opacity-90">Built Right. On Time. Every Time.</p>
+        <div className="text-center">
+          <img 
+            src="https://lirp.cdn-website.com/f1362e52/dms3rep/multi/opt/png_Primary-logo-navy-wording--no-bg-04029866-296w.png"
+            alt="Neda Builda"
+            className="w-full max-w-[280px] mx-auto mb-2"
+          />
           <div className="pt-2">
-            <span className="text-[10px] font-black text-slate-300 uppercase tracking-[0.2em]">Neda Tool</span>
+            <span className="text-[10px] font-black text-slate-300 uppercase tracking-[0.25em]">Neda Tool</span>
           </div>
         </div>
         <form onSubmit={handleLoginAttempt} className="space-y-5">
@@ -659,7 +665,7 @@ const EditUserModal: React.FC<{ user: User; onClose: () => void; onUpdate: (u: U
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-neda-navy/60 backdrop-blur-sm p-4 animate-in fade-in">
-      <form onSubmit={handleSubmit} className="bg-white w-full max-sm rounded-[2.5rem] p-8 space-y-5 shadow-2xl">
+      <form onSubmit={handleSubmit} className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 space-y-5 shadow-2xl">
         <div className="flex justify-between items-center mb-2">
           <h2 className="text-xl font-black text-neda-navy uppercase tracking-tight">Edit Personnel</h2>
           <button type="button" onClick={onClose} className="p-2 bg-slate-50 rounded-xl"><X size={18} /></button>
