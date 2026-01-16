@@ -2,37 +2,21 @@
 import { createClient } from '@supabase/supabase-js';
 import { Tool, User } from '../types';
 
-// Broaden detection for standard and Vite-specific environment variables
-const getEnv = (key: string): string => {
-  // Check process.env (Vercel/Node)
-  if (typeof process !== 'undefined' && process.env && process.env[key]) {
-    return process.env[key] as string;
-  }
-  // Check Vite's import.meta.env
-  // @ts-ignore
-  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env[`VITE_${key}`]) {
-    // @ts-ignore
-    return import.meta.env[`VITE_${key}`] as string;
-  }
-  // Check window/global process (Vite define fallback)
-  const globalProcess = (window as any).process;
-  if (globalProcess?.env?.[key]) {
-    return globalProcess.env[key];
-  }
-  if (globalProcess?.env?.[`VITE_${key}`]) {
-    return globalProcess.env[`VITE_${key}`];
-  }
-  
-  return '';
-};
+// These process.env variables are replaced by string literals during the Vite build process.
+// If they are empty strings here, it means the build-time environment was missing them.
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
 
-const supabaseUrl = getEnv('SUPABASE_URL');
-const supabaseAnonKey = getEnv('SUPABASE_ANON_KEY');
-
-export const supabase = supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey) : null;
+export const supabase = (supabaseUrl && supabaseAnonKey && supabaseUrl !== '' && supabaseAnonKey !== '') 
+  ? createClient(supabaseUrl, supabaseAnonKey) 
+  : null;
 
 if (!supabase) {
-  console.warn("Supabase client failed to initialize. Ensure SUPABASE_URL and SUPABASE_ANON_KEY (or VITE_ equivalents) are set in your environment.");
+  console.warn(
+    "Supabase Client: Missing Credentials.\n" +
+    "1. Ensure SUPABASE_URL and SUPABASE_ANON_KEY are set in Vercel Environment Variables.\n" +
+    "2. You MUST trigger a 'Redeploy' in Vercel after adding variables to bake them into the build."
+  );
 }
 
 // Helper to map JS User to DB User (handling camelCase -> snake_case)
