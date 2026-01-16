@@ -39,7 +39,9 @@ import {
   FileText,
   Image as ImageIcon,
   Clock,
-  Fingerprint
+  Fingerprint,
+  Wifi,
+  WifiOff
 } from 'lucide-react';
 import { analyzeTools, searchAddresses } from './services/geminiService';
 import { fetchTools, fetchUsers, syncTools, syncUsers, supabase } from './services/supabaseService';
@@ -51,6 +53,8 @@ const App: React.FC = () => {
   const [view, setView] = useState<View>('INVENTORY');
   const [showBiometricPrompt, setShowBiometricPrompt] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
   
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<ToolStatus | 'ALL'>('ALL');
@@ -86,17 +90,18 @@ const App: React.FC = () => {
     initData();
   }, []);
 
+  // Periodic background sync
   useEffect(() => {
     if (!isInitializing && tools.length > 0) {
       localStorage.setItem('et_tools', JSON.stringify(tools));
-      syncTools(tools);
+      syncTools(tools).catch(e => setSyncError("Background sync failed"));
     }
   }, [tools, isInitializing]);
 
   useEffect(() => {
     if (!isInitializing && allUsers.length > 0) {
       localStorage.setItem('et_all_users', JSON.stringify(allUsers));
-      syncUsers(allUsers);
+      syncUsers(allUsers).catch(e => setSyncError("Background sync failed"));
     }
   }, [allUsers, isInitializing]);
 
@@ -117,15 +122,77 @@ const App: React.FC = () => {
     setShowBiometricPrompt(false);
   };
 
-  const updateTool = (updatedTool: Tool) => setTools(prev => prev.map(t => t.id === updatedTool.id ? updatedTool : t));
-  const addTool = (newTool: Tool) => setTools(prev => [...prev, newTool]);
-  const bulkAddTools = (newTools: Tool[]) => setTools(prev => [...prev, ...newTools]);
-  
-  const updateUser = (updatedUser: User) => {
-    setAllUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
-    if (currentUser?.id === updatedUser.id) setCurrentUser(updatedUser);
+  const updateTool = async (updatedTool: Tool) => {
+    const newTools = tools.map(t => t.id === updatedTool.id ? updatedTool : t);
+    setTools(newTools);
+    setIsSyncing(true);
+    try {
+      await syncTools(newTools);
+      setSyncError(null);
+    } catch (e) {
+      setSyncError("Failed to save tool update");
+    } finally {
+      setIsSyncing(false);
+    }
   };
-  const addUser = (newUser: User) => setAllUsers(prev => [...prev, newUser]);
+
+  const addTool = async (newTool: Tool) => {
+    const newTools = [...tools, newTool];
+    setTools(newTools);
+    setIsSyncing(true);
+    try {
+      await syncTools(newTools);
+      setSyncError(null);
+    } catch (e) {
+      setSyncError("Failed to save new tool");
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const bulkAddTools = async (newToolsList: Tool[]) => {
+    const updatedTools = [...tools, ...newToolsList];
+    setTools(updatedTools);
+    setIsSyncing(true);
+    try {
+      await syncTools(updatedTools);
+      setSyncError(null);
+    } catch (e) {
+      setSyncError("Bulk import failed to save");
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+  
+  const updateUser = async (updatedUser: User) => {
+    const newUsers = allUsers.map(u => u.id === updatedUser.id ? updatedUser : u);
+    setAllUsers(newUsers);
+    if (currentUser?.id === updatedUser.id) setCurrentUser(updatedUser);
+    setIsSyncing(true);
+    try {
+      await syncUsers(newUsers);
+      setSyncError(null);
+    } catch (e) {
+      setSyncError("Failed to save user update");
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const addUser = async (newUser: User) => {
+    const newUsers = [...allUsers, newUser];
+    setAllUsers(newUsers);
+    setIsSyncing(true);
+    try {
+      await syncUsers(newUsers);
+      setSyncError(null);
+      console.log("User successfully added to Supabase");
+    } catch (e: any) {
+      setSyncError(`Database Error: ${e.message || "Unknown error"}`);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   const filteredTools = useMemo(() => {
     return tools.filter(t => {
@@ -152,6 +219,23 @@ const App: React.FC = () => {
 
   return (
     <Layout activeView={view} setView={setView} userRole={currentUser.role} onLogout={handleLogout}>
+      {/* Global Sync Indicator */}
+      <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[100] pointer-events-none">
+        {isSyncing && (
+          <div className="bg-neda-navy text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 animate-in slide-in-from-top-4">
+            <Loader2 className="animate-spin" size={12} />
+            <span className="text-[8px] font-black uppercase tracking-widest">Syncing to Cloud...</span>
+          </div>
+        )}
+        {syncError && (
+          <div className="bg-red-500 text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 animate-in slide-in-from-top-4">
+            <AlertTriangle size={12} />
+            <span className="text-[8px] font-black uppercase tracking-widest">{syncError}</span>
+            <button onClick={() => setSyncError(null)} className="pointer-events-auto ml-1 bg-white/20 p-1 rounded-full"><X size={8} /></button>
+          </div>
+        )}
+      </div>
+
       {view === 'INVENTORY' && (
         <InventoryView 
           tools={filteredTools} allTools={tools} searchTerm={searchTerm} setSearchTerm={setSearchTerm}
@@ -218,7 +302,7 @@ const InventoryView: React.FC<{
   statusFilter: ToolStatus | 'ALL'; setStatusFilter: (s: ToolStatus | 'ALL') => void;
   userFilter: string | 'ALL'; setUserFilter: (u: string | 'ALL') => void;
   showFilters: boolean; setShowFilters: (b: boolean) => void;
-  currentUser: User; onUpdateTool: (t: Tool) => void; onAddTool: (t: Tool) => void;
+  currentUser: User; onUpdateTool: (t: Tool) => Promise<void>; onAddTool: (t: Tool) => Promise<void>;
 }> = ({ tools, allTools, searchTerm, setSearchTerm, statusFilter, setStatusFilter, userFilter, setUserFilter, showFilters, setShowFilters, currentUser, onUpdateTool, onAddTool }) => {
   const [selectedTool, setSelectedTool] = useState<Tool | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -250,14 +334,15 @@ const InventoryView: React.FC<{
           tools.map(tool => ( <ToolCard key={tool.id} tool={tool} onClick={() => setSelectedTool(tool)} /> ))
         )}
       </div>
-      {selectedTool && <ToolModal tool={selectedTool} onClose={() => setSelectedTool(null)} currentUser={currentUser} onUpdate={(t) => { onUpdateTool(t); setSelectedTool(null); }} />}
-      {showAddModal && <AddToolModal onClose={() => setShowAddModal(false)} onAdd={(t) => { onAddTool(t); setShowAddModal(false); }} currentUser={currentUser} />}
+      {/* Fix: Added async/await to onUpdate and onAdd callbacks to satisfy Promise<void> type requirement */}
+      {selectedTool && <ToolModal tool={selectedTool} onClose={() => setSelectedTool(null)} currentUser={currentUser} onUpdate={async (t) => { await onUpdateTool(t); setSelectedTool(null); }} />}
+      {showAddModal && <AddToolModal onClose={() => setShowAddModal(false)} onAdd={async (t) => { await onAddTool(t); setShowAddModal(false); }} currentUser={currentUser} />}
     </div>
   );
 };
 
 // --- My Tools View ---
-const MyToolsView: React.FC<{ tools: Tool[]; currentUser: User; onUpdateTool: (t: Tool) => void }> = ({ tools, currentUser, onUpdateTool }) => {
+const MyToolsView: React.FC<{ tools: Tool[]; currentUser: User; onUpdateTool: (t: Tool) => Promise<void> }> = ({ tools, currentUser, onUpdateTool }) => {
   const [selectedTool, setSelectedTool] = useState<Tool | null>(null);
   return (
     <div className="space-y-6">
@@ -276,7 +361,8 @@ const MyToolsView: React.FC<{ tools: Tool[]; currentUser: User; onUpdateTool: (t
           tools.map(tool => ( <ToolCard key={tool.id} tool={tool} onClick={() => setSelectedTool(tool)} /> ))
         )}
       </div>
-      {selectedTool && <ToolModal tool={selectedTool} onClose={() => setSelectedTool(null)} currentUser={currentUser} onUpdate={(t) => { onUpdateTool(t); setSelectedTool(null); }} />}
+      {/* Fix: Added async/await to onUpdate callback to satisfy Promise<void> type requirement */}
+      {selectedTool && <ToolModal tool={selectedTool} onClose={() => setSelectedTool(null)} currentUser={currentUser} onUpdate={async (t) => { await onUpdateTool(t); setSelectedTool(null); }} />}
     </div>
   );
 };
@@ -284,8 +370,8 @@ const MyToolsView: React.FC<{ tools: Tool[]; currentUser: User; onUpdateTool: (t
 // --- Admin Dashboard ---
 const AdminDashboard: React.FC<{ 
   tools: Tool[]; allUsers: User[]; currentUser: User; 
-  onUpdateUser: (u: User) => void; onAddUser: (u: User) => void; 
-  onBulkImport: (t: Tool[]) => void;
+  onUpdateUser: (u: User) => Promise<void>; onAddUser: (u: User) => Promise<void>; 
+  onBulkImport: (t: Tool[]) => Promise<void>;
 }> = ({ tools, allUsers, currentUser, onUpdateUser, onAddUser, onBulkImport }) => {
   const [activeTab, setActiveTab] = useState<'REPORTS' | 'USERS'>('REPORTS');
   const [showUserModal, setShowUserModal] = useState(false);
@@ -417,22 +503,27 @@ const AdminDashboard: React.FC<{
         </div>
       )}
 
-      {showUserModal && <AddUserModal onClose={() => setShowUserModal(false)} onAdd={(u) => { onAddUser(u); setShowUserModal(false); }} />}
-      {editingUser && <EditUserModal user={editingUser} onClose={() => setEditingUser(null)} onUpdate={(u) => { onUpdateUser(u); setEditingUser(null); }} />}
+      {/* Fix: Added async/await to onAdd and onUpdate callbacks to satisfy Promise<void> type requirement */}
+      {showUserModal && <AddUserModal onClose={() => setShowUserModal(false)} onAdd={async (u) => { await onAddUser(u); setShowUserModal(false); }} />}
+      {editingUser && <EditUserModal user={editingUser} onClose={() => setEditingUser(null)} onUpdate={async (u) => { await onUpdateUser(u); setEditingUser(null); }} />}
     </div>
   );
 };
 
 // --- Modals ---
 
-const AddUserModal: React.FC<{ onClose: () => void; onAdd: (u: User) => void }> = ({ onClose, onAdd }) => {
+const AddUserModal: React.FC<{ onClose: () => void; onAdd: (u: User) => Promise<void> }> = ({ onClose, onAdd }) => {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('Builda123'); // Default initial password
   const [role, setRole] = useState(UserRole.USER);
-  const handleSubmit = (e: React.FormEvent) => {
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onAdd({ id: 'U' + Math.random().toString(36).substr(2, 5).toUpperCase(), name, email, role, password, isEnabled: true });
+    setLoading(true);
+    await onAdd({ id: 'U' + Math.random().toString(36).substr(2, 5).toUpperCase(), name, email, role, password, isEnabled: true });
+    setLoading(false);
   };
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-neda-navy/60 backdrop-blur-sm p-4 animate-in fade-in">
@@ -463,21 +554,26 @@ const AddUserModal: React.FC<{ onClose: () => void; onAdd: (u: User) => void }> 
             </select>
           </div>
         </div>
-        <button type="submit" className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all">Create Account</button>
+        <button type="submit" disabled={loading} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2">
+          {loading ? <Loader2 className="animate-spin" size={18} /> : "Create Account"}
+        </button>
       </form>
     </div>
   );
 };
 
-const EditUserModal: React.FC<{ user: User; onClose: () => void; onUpdate: (u: User) => void }> = ({ user, onClose, onUpdate }) => {
+const EditUserModal: React.FC<{ user: User; onClose: () => void; onUpdate: (u: User) => Promise<void> }> = ({ user, onClose, onUpdate }) => {
   const [name, setName] = useState(user.name);
   const [email, setEmail] = useState(user.email);
   const [password, setPassword] = useState(user.password || '');
   const [role, setRole] = useState(user.role);
+  const [loading, setLoading] = useState(false);
   
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onUpdate({ ...user, name, email, password, role });
+    setLoading(true);
+    await onUpdate({ ...user, name, email, password, role });
+    setLoading(false);
   };
 
   return (
@@ -512,7 +608,9 @@ const EditUserModal: React.FC<{ user: User; onClose: () => void; onUpdate: (u: U
             </select>
           </div>
         </div>
-        <button type="submit" className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg">Save Changes</button>
+        <button type="submit" disabled={loading} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg flex items-center justify-center gap-2">
+           {loading ? <Loader2 className="animate-spin" size={18} /> : "Save Changes"}
+        </button>
       </form>
     </div>
   );
@@ -548,12 +646,21 @@ const ToolCard: React.FC<{ tool: Tool; onClick: () => void }> = ({ tool, onClick
   </button>
 );
 
-const ToolModal: React.FC<{ tool: Tool; onClose: () => void; currentUser: User; onUpdate: (t: Tool) => void; }> = ({ tool, onClose, currentUser, onUpdate }) => {
+const ToolModal: React.FC<{ tool: Tool; onClose: () => void; currentUser: User; onUpdate: (t: Tool) => Promise<void>; }> = ({ tool, onClose, currentUser, onUpdate }) => {
   const [action, setAction] = useState<'IDLE' | 'BOOKING' | 'RETURNING'>('IDLE');
   const [site, setSite] = useState('');
+  const [loading, setLoading] = useState(false);
   
-  const handleBooking = () => onUpdate({ ...tool, status: ToolStatus.BOOKED_OUT, currentHolderId: currentUser.id, currentHolderName: currentUser.name, currentSite: site, bookedAt: Date.now(), logs: [...tool.logs, { id: Math.random().toString(36).substr(2, 9), userId: currentUser.id, userName: currentUser.name, action: 'BOOK_OUT', timestamp: Date.now(), site }] });
-  const handleReturn = () => onUpdate({ ...tool, status: ToolStatus.AVAILABLE, currentHolderId: undefined, currentHolderName: undefined, currentSite: undefined, bookedAt: undefined, lastReturnedAt: Date.now(), logs: [...tool.logs, { id: Math.random().toString(36).substr(2, 9), userId: currentUser.id, userName: currentUser.name, action: 'RETURN', timestamp: Date.now() }] });
+  const handleBooking = async () => {
+    setLoading(true);
+    await onUpdate({ ...tool, status: ToolStatus.BOOKED_OUT, currentHolderId: currentUser.id, currentHolderName: currentUser.name, currentSite: site, bookedAt: Date.now(), logs: [...tool.logs, { id: Math.random().toString(36).substr(2, 9), userId: currentUser.id, userName: currentUser.name, action: 'BOOK_OUT', timestamp: Date.now(), site }] });
+    setLoading(false);
+  };
+  const handleReturn = async () => {
+    setLoading(true);
+    await onUpdate({ ...tool, status: ToolStatus.AVAILABLE, currentHolderId: undefined, currentHolderName: undefined, currentSite: undefined, bookedAt: undefined, lastReturnedAt: Date.now(), logs: [...tool.logs, { id: Math.random().toString(36).substr(2, 9), userId: currentUser.id, userName: currentUser.name, action: 'RETURN', timestamp: Date.now() }] });
+    setLoading(false);
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-neda-navy/60 backdrop-blur-sm p-0 sm:p-4">
@@ -573,24 +680,25 @@ const ToolModal: React.FC<{ tool: Tool; onClose: () => void; currentUser: User; 
             </div>
             {tool.status === ToolStatus.AVAILABLE && <button onClick={() => setAction('BOOKING')} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest active:scale-95 transition-all">Assign to Site</button>}
             {tool.status === ToolStatus.BOOKED_OUT && tool.currentHolderId === currentUser.id && <button onClick={() => setAction('RETURNING')} className="w-full py-5 bg-green-600 text-white rounded-2xl font-black uppercase tracking-widest active:scale-95 transition-all">Confirm Return</button>}
-            {tool.status === ToolStatus.BOOKED_OUT && tool.currentHolderId !== currentUser.id && (
-              <p className="text-center text-[10px] font-bold text-neda-navy/40 uppercase tracking-widest">Currently deployed by {tool.currentHolderName}</p>
-            )}
           </div>
         )}
         {action === 'BOOKING' && (
           <div className="space-y-4 animate-in slide-in-from-right-4">
              <div className="space-y-1">
                 <label className="text-[9px] font-black text-neda-navy/40 uppercase tracking-widest ml-1">Site Location</label>
-                <input type="text" placeholder="e.g. Waterfront Project" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm outline-none focus:ring-2 focus:ring-neda-orange" value={site} onChange={e => setSite(e.target.value)} />
+                <input type="text" placeholder="e.g. Waterfront Project" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm outline-none" value={site} onChange={e => setSite(e.target.value)} />
              </div>
-             <button onClick={handleBooking} disabled={!site} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest disabled:opacity-50 active:scale-95 transition-all">Confirm Deployment</button>
+             <button onClick={handleBooking} disabled={!site || loading} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest disabled:opacity-50 active:scale-95 transition-all flex items-center justify-center gap-2">
+                {loading && <Loader2 className="animate-spin" size={18} />} Assign Deployment
+             </button>
           </div>
         )}
         {action === 'RETURNING' && (
           <div className="space-y-4 animate-in slide-in-from-right-4">
              <p className="text-xs font-bold text-neda-navy/60 text-center px-4">Confirming the return of this asset to the Neda Builda Warehouse.</p>
-             <button onClick={handleReturn} className="w-full py-5 bg-green-600 text-white rounded-2xl font-black uppercase tracking-widest active:scale-95 transition-all">Process Return</button>
+             <button onClick={handleReturn} disabled={loading} className="w-full py-5 bg-green-600 text-white rounded-2xl font-black uppercase tracking-widest active:scale-95 transition-all flex items-center justify-center gap-2">
+                {loading && <Loader2 className="animate-spin" size={18} />} Process Return
+             </button>
           </div>
         )}
       </div>
@@ -598,13 +706,16 @@ const ToolModal: React.FC<{ tool: Tool; onClose: () => void; currentUser: User; 
   );
 };
 
-const AddToolModal: React.FC<{ onClose: () => void; onAdd: (t: Tool) => void; currentUser: User }> = ({ onClose, onAdd, currentUser }) => {
+const AddToolModal: React.FC<{ onClose: () => void; onAdd: (t: Tool) => Promise<void>; currentUser: User }> = ({ onClose, onAdd, currentUser }) => {
   const [name, setName] = useState('');
   const [serial, setSerial] = useState('');
   const [category, setCategory] = useState('Power Tools');
-  const handleSubmit = (e: React.FormEvent) => {
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onAdd({ 
+    setLoading(true);
+    await onAdd({ 
       id: 'T' + Math.random().toString(36).substr(2, 5).toUpperCase(), 
       name, 
       category, 
@@ -612,6 +723,7 @@ const AddToolModal: React.FC<{ onClose: () => void; onAdd: (t: Tool) => void; cu
       status: ToolStatus.AVAILABLE, 
       logs: [{ id: 'L1', userId: currentUser.id, userName: currentUser.name, action: 'CREATE', timestamp: Date.now() }] 
     });
+    setLoading(false);
   };
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-neda-navy/60 backdrop-blur-sm p-4 animate-in fade-in">
@@ -627,7 +739,9 @@ const AddToolModal: React.FC<{ onClose: () => void; onAdd: (t: Tool) => void; cu
              <option>Safety Kit</option>
           </select>
         </div>
-        <button type="submit" className="w-full py-5 bg-neda-orange text-white rounded-2xl font-black uppercase tracking-widest shadow-lg shadow-neda-orange/20 active:scale-95 transition-all">Add to System</button>
+        <button type="submit" disabled={loading} className="w-full py-5 bg-neda-orange text-white rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2">
+           {loading ? <Loader2 className="animate-spin" size={18} /> : "Add to System"}
+        </button>
         <button onClick={onClose} type="button" className="w-full text-slate-400 font-bold uppercase text-[10px]">Cancel</button>
       </form>
     </div>
@@ -648,24 +762,15 @@ const AIAssistant: React.FC<{ tools: Tool[] }> = ({ tools }) => {
   };
   return (
     <div className="flex flex-col h-[70vh] bg-slate-50 rounded-[2.5rem] overflow-hidden border border-slate-100 shadow-inner">
-       <div className="bg-neda-navy p-4 flex items-center gap-3 text-white border-b border-neda-orange/20">
+       <div className="bg-neda-navy p-4 flex items-center gap-3 text-white">
           <Sparkles className="text-neda-orange" size={20} />
-          <div>
-            <span className="font-black text-xs uppercase tracking-tight">Pulse Coordinator</span>
-            <p className="text-[7px] font-bold text-neda-orange uppercase tracking-widest leading-none">AI Asset Intelligence</p>
-          </div>
+          <span className="font-black text-xs uppercase">Pulse Assistant</span>
        </div>
        <div className="flex-1 overflow-y-auto p-4 space-y-4 hide-scrollbar">
-          {messages.length === 0 && (
-            <div className="h-full flex flex-col items-center justify-center opacity-20 text-center px-6">
-              <Sparkles size={48} className="mb-4 text-neda-navy" />
-              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-neda-navy">Ask about stock levels, equipment locations, or repair statuses.</p>
-            </div>
-          )}
           {messages.map((m, i) => (
-            <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'} animate-in slide-in-from-bottom-2`}>
-              <div className={`text-[11px] font-bold leading-relaxed p-4 rounded-2xl max-w-[85%] ${
-                m.role === 'user' ? 'bg-neda-orange text-white rounded-tr-none' : 'bg-white text-neda-navy border border-slate-100 rounded-tl-none shadow-sm'
+            <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              <div className={`text-[11px] font-bold p-4 rounded-2xl max-w-[85%] ${
+                m.role === 'user' ? 'bg-neda-orange text-white rounded-tr-none' : 'bg-white text-neda-navy border border-slate-100 rounded-tl-none'
               }`}>
                 {m.content}
               </div>
@@ -674,8 +779,8 @@ const AIAssistant: React.FC<{ tools: Tool[] }> = ({ tools }) => {
           {loading && <div className="flex justify-start px-2"><Loader2 className="animate-spin text-neda-navy opacity-20" size={16} /></div>}
        </div>
        <div className="p-4 bg-white border-t border-slate-100 flex gap-2">
-          <input type="text" placeholder="How many drills are available?" className="flex-1 p-4 bg-slate-50 rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-neda-orange transition-all" value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSend()} />
-          <button onClick={handleSend} className="p-4 bg-neda-navy text-white rounded-2xl hover:bg-neda-orange transition-all active:scale-95 shadow-lg"><Send size={18} /></button>
+          <input type="text" placeholder="Ask Pulse..." className="flex-1 p-4 bg-slate-50 rounded-2xl text-xs font-bold outline-none" value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSend()} />
+          <button onClick={handleSend} className="p-4 bg-neda-navy text-white rounded-2xl"><Send size={18} /></button>
        </div>
     </div>
   );
