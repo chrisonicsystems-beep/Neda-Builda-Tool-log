@@ -381,6 +381,9 @@ const InventoryView: React.FC<{
 }> = ({ tools, allTools, searchTerm, setSearchTerm, statusFilter, setStatusFilter, userFilter, setUserFilter, showFilters, setShowFilters, currentUser, onUpdateTool, onAddTool }) => {
   const [selectedTool, setSelectedTool] = useState<Tool | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
+  
+  const canManage = currentUser.role === UserRole.ADMIN || currentUser.role === UserRole.MANAGER;
+
   return (
     <div className="space-y-5">
       <div className="flex gap-2">
@@ -399,7 +402,7 @@ const InventoryView: React.FC<{
           </select>
         </div>
       )}
-      {currentUser.role === UserRole.ADMIN && (
+      {canManage && (
         <button onClick={() => setShowAddModal(true)} className="w-full py-4 border-2 border-dashed border-neda-orange/30 text-neda-orange rounded-2xl flex items-center justify-center gap-3 font-black text-xs uppercase hover:bg-neda-orange/5 transition-colors"><Plus size={20} /> Register New Equipment</button>
       )}
       <div className="grid gap-4">
