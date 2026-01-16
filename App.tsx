@@ -69,10 +69,10 @@ const App: React.FC = () => {
       if (remoteTools && remoteUsers) {
         if (remoteTools.length === 0 && remoteUsers.length === 0) {
           setTools(INITIAL_TOOLS);
-          setAllUsers(INITIAL_USERS);
+          setAllUsers(remoteUsers.length > 0 ? remoteUsers : INITIAL_USERS);
           try {
             await syncTools(INITIAL_TOOLS);
-            await syncUsers(INITIAL_USERS);
+            if (remoteUsers.length === 0) await syncUsers(INITIAL_USERS);
           } catch (e) {
             console.error("Failed initial seed sync:", e);
           }
@@ -179,6 +179,15 @@ const App: React.FC = () => {
     }
   };
 
+  const handleForgotPassword = async (email: string) => {
+    const user = allUsers.find(u => u.email.toLowerCase() === email.toLowerCase());
+    if (!user) {
+      throw new Error("No account found with this email.");
+    }
+    const updatedUser = { ...user, password: 'NedaReset123' };
+    await updateUser(updatedUser);
+  };
+
   const filteredTools = useMemo(() => {
     return tools.filter(t => {
       const matchesSearch = t.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -200,7 +209,7 @@ const App: React.FC = () => {
     </div>
   );
 
-  if (!currentUser) return <LoginScreen onLogin={handleLogin} users={allUsers} />;
+  if (!currentUser) return <LoginScreen onLogin={handleLogin} users={allUsers} onResetPassword={handleForgotPassword} />;
 
   return (
     <Layout activeView={view} setView={setView} userRole={currentUser.role} onLogout={handleLogout}>
@@ -255,16 +264,23 @@ const App: React.FC = () => {
 };
 
 // --- Login Screen ---
-const LoginScreen: React.FC<{ onLogin: (u: User, rem: boolean) => void; users: User[] }> = ({ onLogin, users }) => {
+const LoginScreen: React.FC<{ 
+  onLogin: (u: User, rem: boolean) => void; 
+  users: User[];
+  onResetPassword: (email: string) => Promise<void>;
+}> = ({ onLogin, users, onResetPassword }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [showResetModal, setShowResetModal] = useState(false);
+
   const handleLoginAttempt = (e: React.FormEvent) => {
     e.preventDefault();
     const user = users.find(u => u.email.toLowerCase() === email.toLowerCase() && u.password === password);
     if (user && user.isEnabled) onLogin(user, true);
     else setError('Invalid credentials or account disabled.');
   };
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6">
       <div className="w-full max-w-sm bg-white rounded-[2.5rem] p-8 space-y-8 shadow-2xl border border-slate-100">
@@ -274,11 +290,82 @@ const LoginScreen: React.FC<{ onLogin: (u: User, rem: boolean) => void; users: U
           <p className="text-[12px] font-extrabold text-neda-navy opacity-40 uppercase tracking-widest">Asset Log</p>
         </div>
         <form onSubmit={handleLoginAttempt} className="space-y-5">
-          <input type="email" placeholder="Email" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-2 focus:ring-neda-orange transition-all" value={email} onChange={e => setEmail(e.target.value)} required />
-          <input type="password" placeholder="Password" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-2 focus:ring-neda-orange transition-all" value={password} onChange={e => setPassword(e.target.value)} required />
-          {error && <p className="text-red-500 text-[10px] font-black">{error}</p>}
+          <input type="email" placeholder="Email" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-2 focus:ring-neda-orange transition-all font-semibold" value={email} onChange={e => setEmail(e.target.value)} required />
+          <div className="space-y-2">
+            <input type="password" placeholder="Password" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-2 focus:ring-neda-orange transition-all font-semibold" value={password} onChange={e => setPassword(e.target.value)} required />
+            <button 
+              type="button" 
+              onClick={() => setShowResetModal(true)}
+              className="text-[10px] font-black text-neda-orange uppercase tracking-widest pl-2 block"
+            >
+              Forgot Password?
+            </button>
+          </div>
+          {error && <p className="text-red-500 text-[10px] font-black text-center">{error}</p>}
           <button type="submit" className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all">Sign In</button>
         </form>
+      </div>
+
+      {showResetModal && <ResetPasswordModal onClose={() => setShowResetModal(false)} onReset={onResetPassword} />}
+    </div>
+  );
+};
+
+const ResetPasswordModal: React.FC<{ onClose: () => void; onReset: (email: string) => Promise<void> }> = ({ onClose, onReset }) => {
+  const [email, setEmail] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [msg, setMsg] = useState('');
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setStatus('idle');
+    try {
+      await onReset(email);
+      setStatus('success');
+      setMsg("Password reset to 'NedaReset123'. Please log in with this temporary password.");
+    } catch (err: any) {
+      setStatus('error');
+      setMsg(err.message || "Failed to reset password.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-neda-navy/60 backdrop-blur-sm p-4 animate-in fade-in">
+      <div className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 space-y-6 shadow-2xl animate-in zoom-in-95">
+        <div className="flex justify-between items-center">
+          <h3 className="text-xl font-black text-neda-navy uppercase">Reset Password</h3>
+          <button onClick={onClose} className="p-2 bg-slate-50 rounded-xl"><X size={18} /></button>
+        </div>
+        
+        {status !== 'success' ? (
+          <form onSubmit={handleSubmit} className="space-y-5">
+            <p className="text-xs text-slate-500 font-medium">Enter your work email and we'll reset your password to a default value.</p>
+            <input 
+              type="email" 
+              placeholder="Work Email" 
+              className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-2 focus:ring-neda-orange font-bold text-sm" 
+              value={email} 
+              onChange={e => setEmail(e.target.value)} 
+              required 
+            />
+            {status === 'error' && <p className="text-red-500 text-[10px] font-black">{msg}</p>}
+            <button type="submit" disabled={loading} className="w-full py-4 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest flex items-center justify-center gap-2">
+              {loading ? <Loader2 className="animate-spin" size={18} /> : "Reset My Password"}
+            </button>
+          </form>
+        ) : (
+          <div className="space-y-5 text-center py-4">
+            <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-2">
+              <CheckCircle2 size={32} />
+            </div>
+            <p className="text-xs font-bold text-slate-700">{msg}</p>
+            <button onClick={onClose} className="w-full py-4 bg-neda-navy text-white rounded-2xl font-black uppercase">Got it</button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -299,7 +386,7 @@ const InventoryView: React.FC<{
       <div className="flex gap-2">
         <div className="relative flex-1">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-neda-navy/30" size={18} />
-          <input type="text" placeholder="Find equipment..." className="w-full pl-11 pr-4 py-3.5 rounded-2xl bg-white border border-slate-100 shadow-sm outline-none focus:ring-2 focus:ring-neda-orange" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+          <input type="text" placeholder="Find equipment..." className="w-full pl-11 pr-4 py-3.5 rounded-2xl bg-white border border-slate-100 shadow-sm outline-none focus:ring-2 focus:ring-neda-orange font-semibold" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
         </div>
         <button onClick={() => setShowFilters(!showFilters)} className={`p-3.5 rounded-2xl transition-colors ${showFilters ? 'bg-neda-orange text-white' : 'bg-white text-neda-navy/50 border border-slate-100'}`}><Filter size={20} /></button>
       </div>
