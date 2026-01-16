@@ -284,19 +284,22 @@ const LoginScreen: React.FC<{
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6">
       <div className="w-full max-w-sm bg-white rounded-[2.5rem] p-8 space-y-8 shadow-2xl border border-slate-100">
-        <div className="text-center">
-          <NedaLogo size={80} className="mx-auto mb-4" />
-          <h1 className="text-neda-navy font-black text-3xl">Neda Builda</h1>
-          <p className="text-[12px] font-extrabold text-neda-navy opacity-40 uppercase tracking-widest">Asset Log</p>
+        <div className="text-center space-y-3">
+          <NedaLogo size={100} className="mx-auto" />
+          <h1 className="text-neda-navy font-bold text-4xl tracking-tight">Neda Builda</h1>
+          <p className="text-sm font-semibold text-neda-navy tracking-tight opacity-90">Built Right. On Time. Every Time.</p>
+          <div className="pt-2">
+            <span className="text-[10px] font-black text-slate-300 uppercase tracking-[0.2em]">Neda Tool</span>
+          </div>
         </div>
         <form onSubmit={handleLoginAttempt} className="space-y-5">
           <input type="email" placeholder="Email" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-2 focus:ring-neda-orange transition-all font-semibold" value={email} onChange={e => setEmail(e.target.value)} required />
-          <div className="space-y-2">
+          <div className="space-y-4">
             <input type="password" placeholder="Password" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-2 focus:ring-neda-orange transition-all font-semibold" value={password} onChange={e => setPassword(e.target.value)} required />
             <button 
               type="button" 
               onClick={() => setShowResetModal(true)}
-              className="text-[10px] font-black text-neda-orange uppercase tracking-widest pl-2 block"
+              className="text-[10px] font-black text-neda-orange uppercase tracking-[0.15em] mx-auto block hover:opacity-70 transition-opacity"
             >
               Forgot Password?
             </button>
@@ -656,7 +659,7 @@ const EditUserModal: React.FC<{ user: User; onClose: () => void; onUpdate: (u: U
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-neda-navy/60 backdrop-blur-sm p-4 animate-in fade-in">
-      <form onSubmit={handleSubmit} className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 space-y-5 shadow-2xl">
+      <form onSubmit={handleSubmit} className="bg-white w-full max-sm rounded-[2.5rem] p-8 space-y-5 shadow-2xl">
         <div className="flex justify-between items-center mb-2">
           <h2 className="text-xl font-black text-neda-navy uppercase tracking-tight">Edit Personnel</h2>
           <button type="button" onClick={onClose} className="p-2 bg-slate-50 rounded-xl"><X size={18} /></button>
