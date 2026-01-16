@@ -132,7 +132,6 @@ const App: React.FC = () => {
       setSyncError(null);
     } catch (e: any) {
       setSyncError(e.message || "Registration Failed");
-      // Rollback UI state on error if needed, but usually simpler to just let user fix it
     } finally {
       setIsSyncing(false);
     }
@@ -174,7 +173,7 @@ const App: React.FC = () => {
       setSyncError(null);
     } catch (e: any) {
       setSyncError(e.message || "Registration Failed");
-      throw e; // Rethrow so modal doesn't close
+      throw e; 
     } finally {
       setIsSyncing(false);
     }
@@ -205,7 +204,6 @@ const App: React.FC = () => {
 
   return (
     <Layout activeView={view} setView={setView} userRole={currentUser.role} onLogout={handleLogout}>
-      {/* Global Sync/Connection Indicator */}
       <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[100] w-full max-w-xs pointer-events-none px-4">
         {!supabase ? (
            <div className="bg-amber-500 text-white px-4 py-2 rounded-2xl shadow-lg flex items-center justify-center gap-2 animate-in slide-in-from-top-4">
@@ -374,7 +372,7 @@ const AdminDashboard: React.FC<{
   const exportCSV = () => {
     const headers = ['Asset ID', 'Name', 'Category', 'Serial', 'Status', 'Current Holder', 'Current Site'];
     const rows = tools.map(t => [
-      t.id, t.name, t.category, t.serialNumber, t.status, 
+      t.id, t.name, t.category || 'General', t.serialNumber, t.status, 
       t.currentHolderName || 'Warehouse', t.currentSite || 'Warehouse'
     ]);
     const csvContent = [headers, ...rows].map(e => e.join(",")).join("\n");
@@ -498,11 +496,10 @@ const AdminDashboard: React.FC<{
 };
 
 // --- Modals ---
-
 const AddUserModal: React.FC<{ onClose: () => void; onAdd: (u: User) => Promise<void> }> = ({ onClose, onAdd }) => {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('Builda123'); // Default initial password
+  const [password, setPassword] = useState('Builda123'); 
   const [role, setRole] = useState(UserRole.USER);
   const [loading, setLoading] = useState(false);
 
@@ -512,7 +509,6 @@ const AddUserModal: React.FC<{ onClose: () => void; onAdd: (u: User) => Promise<
     try {
       await onAdd({ id: 'U' + Math.random().toString(36).substr(2, 5).toUpperCase(), name, email, role, password, isEnabled: true });
     } catch (e) {
-      // Keep modal open if sync failed
     } finally {
       setLoading(false);
     }
@@ -629,12 +625,10 @@ const ToolCard: React.FC<{ tool: Tool; onClick: () => void }> = ({ tool, onClick
       </div>
       <StatusBadge status={tool.status} />
     </div>
-    {tool.status === ToolStatus.BOOKED_OUT && (
-      <div className="mt-4 pt-3 border-t border-slate-50 flex items-center justify-between text-[10px] font-bold uppercase text-neda-navy/60">
-        <div className="flex items-center gap-2"><UserIcon size={14} className="text-neda-orange" /> {tool.currentHolderName}</div>
-        <div className="flex items-center gap-2"><MapPin size={14} className="text-slate-300" /> {tool.currentSite}</div>
-      </div>
-    )}
+    <div className="mt-4 pt-3 border-t border-slate-50 flex items-center justify-between text-[10px] font-bold uppercase text-neda-navy/60">
+      <div className="flex items-center gap-2">{tool.status === ToolStatus.BOOKED_OUT ? <><UserIcon size={14} className="text-neda-orange" /> {tool.currentHolderName}</> : <span className="opacity-40">{tool.category || 'General'}</span>}</div>
+      {tool.status === ToolStatus.BOOKED_OUT && <div className="flex items-center gap-2"><MapPin size={14} className="text-slate-300" /> {tool.currentSite}</div>}
+    </div>
   </button>
 );
 
@@ -668,7 +662,7 @@ const ToolModal: React.FC<{ tool: Tool; onClose: () => void; currentUser: User; 
           <div className="space-y-6">
             <div className="flex justify-between items-center">
               <StatusBadge status={tool.status} />
-              <span className="text-[10px] font-black text-slate-300 uppercase">{tool.category}</span>
+              <span className="text-[10px] font-black text-slate-300 uppercase">{tool.category || 'General'}</span>
             </div>
             {tool.status === ToolStatus.AVAILABLE && <button onClick={() => setAction('BOOKING')} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest active:scale-95 transition-all">Assign to Site</button>}
             {tool.status === ToolStatus.BOOKED_OUT && tool.currentHolderId === currentUser.id && <button onClick={() => setAction('RETURNING')} className="w-full py-5 bg-green-600 text-white rounded-2xl font-black uppercase tracking-widest active:scale-95 transition-all">Confirm Return</button>}
@@ -717,7 +711,6 @@ const AddToolModal: React.FC<{ onClose: () => void; onAdd: (t: Tool) => Promise<
         logs: [{ id: 'L' + Date.now(), userId: currentUser.id, userName: currentUser.name, action: 'CREATE', timestamp: Date.now() }] 
       });
     } catch (e) {
-      // Keep modal open on error
     } finally {
       setLoading(false);
     }

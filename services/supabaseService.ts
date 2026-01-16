@@ -34,7 +34,7 @@ const mapDbToUser = (dbUser: any): User => ({
 const mapToolToDb = (tool: Tool) => ({
   id: tool.id,
   name: tool.name,
-  category: tool.category,
+  // Removed category from DB sync to resolve schema mismatch errors
   serial_number: tool.serialNumber,
   status: tool.status,
   current_holder_id: tool.currentHolderId,
@@ -43,13 +43,13 @@ const mapToolToDb = (tool: Tool) => ({
   booked_at: tool.bookedAt,
   last_returned_at: tool.lastReturnedAt,
   main_photo: tool.mainPhoto,
-  logs: tool.logs
+  logs: tool.logs || []
 });
 
 const mapDbToTool = (dbTool: any): Tool => ({
   id: dbTool.id,
   name: dbTool.name,
-  category: dbTool.category,
+  category: dbTool.category || 'General', // Fallback if column exists but is empty, or if we want a default
   serialNumber: dbTool.serial_number,
   status: dbTool.status as any,
   currentHolderId: dbTool.current_holder_id,
@@ -65,6 +65,7 @@ export const upsertSingleTool = async (tool: Tool) => {
   if (!supabase) return;
   const { error } = await supabase.from('tools').upsert(mapToolToDb(tool));
   if (error) {
+    console.error("Supabase Error (upsertSingleTool):", error);
     if (error.code === '23505') throw new Error(`Asset with this ID or Serial already exists.`);
     throw error;
   }
@@ -74,6 +75,7 @@ export const upsertSingleUser = async (user: User) => {
   if (!supabase) return;
   const { error } = await supabase.from('users').upsert(mapUserToDb(user));
   if (error) {
+    console.error("Supabase Error (upsertSingleUser):", error);
     if (error.code === '23505') throw new Error(`Personnel with this Email already exists.`);
     throw error;
   }
@@ -89,7 +91,10 @@ export const syncTools = async (tools: Tool[]) => {
 export const fetchTools = async (): Promise<Tool[] | null> => {
   if (!supabase) return null;
   const { data, error } = await supabase.from('tools').select('*');
-  if (error) return null;
+  if (error) {
+    console.error('Error fetching tools:', error);
+    return null;
+  }
   return data.map(mapDbToTool);
 };
 
@@ -103,6 +108,9 @@ export const syncUsers = async (users: User[]) => {
 export const fetchUsers = async (): Promise<User[] | null> => {
   if (!supabase) return null;
   const { data, error } = await supabase.from('users').select('*');
-  if (error) return null;
+  if (error) {
+    console.error('Error fetching users:', error);
+    return null;
+  }
   return data.map(mapDbToUser);
 };
