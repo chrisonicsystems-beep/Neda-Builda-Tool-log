@@ -2,14 +2,37 @@
 import { createClient } from '@supabase/supabase-js';
 import { Tool, User } from '../types';
 
-// Detect environment variables for both local and production (Vite/Vercel)
-const supabaseUrl = process.env.SUPABASE_URL || (window as any).process?.env?.SUPABASE_URL || '';
-const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || (window as any).process?.env?.SUPABASE_ANON_KEY || '';
+// Broaden detection for standard and Vite-specific environment variables
+const getEnv = (key: string): string => {
+  // Check process.env (Vercel/Node)
+  if (typeof process !== 'undefined' && process.env && process.env[key]) {
+    return process.env[key] as string;
+  }
+  // Check Vite's import.meta.env
+  // @ts-ignore
+  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env[`VITE_${key}`]) {
+    // @ts-ignore
+    return import.meta.env[`VITE_${key}`] as string;
+  }
+  // Check window/global process (Vite define fallback)
+  const globalProcess = (window as any).process;
+  if (globalProcess?.env?.[key]) {
+    return globalProcess.env[key];
+  }
+  if (globalProcess?.env?.[`VITE_${key}`]) {
+    return globalProcess.env[`VITE_${key}`];
+  }
+  
+  return '';
+};
+
+const supabaseUrl = getEnv('SUPABASE_URL');
+const supabaseAnonKey = getEnv('SUPABASE_ANON_KEY');
 
 export const supabase = supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey) : null;
 
 if (!supabase) {
-  console.warn("Supabase client failed to initialize. Check your environment variables (SUPABASE_URL and SUPABASE_ANON_KEY).");
+  console.warn("Supabase client failed to initialize. Ensure SUPABASE_URL and SUPABASE_ANON_KEY (or VITE_ equivalents) are set in your environment.");
 }
 
 // Helper to map JS User to DB User (handling camelCase -> snake_case)
