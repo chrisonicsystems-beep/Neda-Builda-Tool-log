@@ -70,8 +70,12 @@ const App: React.FC = () => {
         if (remoteTools.length === 0 && remoteUsers.length === 0) {
           setTools(INITIAL_TOOLS);
           setAllUsers(INITIAL_USERS);
-          await syncTools(INITIAL_TOOLS);
-          await syncUsers(INITIAL_USERS);
+          try {
+            await syncTools(INITIAL_TOOLS);
+            await syncUsers(INITIAL_USERS);
+          } catch (e) {
+            console.error("Failed initial seed sync:", e);
+          }
         } else {
           setTools(remoteTools);
           setAllUsers(remoteUsers);
@@ -89,21 +93,6 @@ const App: React.FC = () => {
     };
     initData();
   }, []);
-
-  // Periodic background sync
-  useEffect(() => {
-    if (!isInitializing && tools.length > 0) {
-      localStorage.setItem('et_tools', JSON.stringify(tools));
-      syncTools(tools).catch(e => setSyncError("Background sync failed"));
-    }
-  }, [tools, isInitializing]);
-
-  useEffect(() => {
-    if (!isInitializing && allUsers.length > 0) {
-      localStorage.setItem('et_all_users', JSON.stringify(allUsers));
-      syncUsers(allUsers).catch(e => setSyncError("Background sync failed"));
-    }
-  }, [allUsers, isInitializing]);
 
   const handleLogin = (user: User, remember: boolean) => {
     setCurrentUser(user);
@@ -129,8 +118,8 @@ const App: React.FC = () => {
     try {
       await syncTools(newTools);
       setSyncError(null);
-    } catch (e) {
-      setSyncError("Failed to save tool update");
+    } catch (e: any) {
+      setSyncError(`Sync Error: ${e.message}`);
     } finally {
       setIsSyncing(false);
     }
@@ -143,8 +132,8 @@ const App: React.FC = () => {
     try {
       await syncTools(newTools);
       setSyncError(null);
-    } catch (e) {
-      setSyncError("Failed to save new tool");
+    } catch (e: any) {
+      setSyncError(`Sync Error: ${e.message}`);
     } finally {
       setIsSyncing(false);
     }
@@ -157,8 +146,8 @@ const App: React.FC = () => {
     try {
       await syncTools(updatedTools);
       setSyncError(null);
-    } catch (e) {
-      setSyncError("Bulk import failed to save");
+    } catch (e: any) {
+      setSyncError(`Sync Error: ${e.message}`);
     } finally {
       setIsSyncing(false);
     }
@@ -172,8 +161,8 @@ const App: React.FC = () => {
     try {
       await syncUsers(newUsers);
       setSyncError(null);
-    } catch (e) {
-      setSyncError("Failed to save user update");
+    } catch (e: any) {
+      setSyncError(`Sync Error: ${e.message}`);
     } finally {
       setIsSyncing(false);
     }
@@ -184,10 +173,12 @@ const App: React.FC = () => {
     setAllUsers(newUsers);
     setIsSyncing(true);
     try {
+      if (!supabase) throw new Error("Supabase is not connected. Check your environment variables.");
       await syncUsers(newUsers);
       setSyncError(null);
       console.log("User successfully added to Supabase");
     } catch (e: any) {
+      console.error("Add user failed:", e);
       setSyncError(`Database Error: ${e.message || "Unknown error"}`);
     } finally {
       setIsSyncing(false);
@@ -219,21 +210,25 @@ const App: React.FC = () => {
 
   return (
     <Layout activeView={view} setView={setView} userRole={currentUser.role} onLogout={handleLogout}>
-      {/* Global Sync Indicator */}
+      {/* Global Sync/Connection Indicator */}
       <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[100] pointer-events-none">
-        {isSyncing && (
+        {!supabase ? (
+           <div className="bg-amber-500 text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 animate-in slide-in-from-top-4">
+            <WifiOff size={12} />
+            <span className="text-[8px] font-black uppercase tracking-widest">Supabase Disconnected (Offline Mode)</span>
+          </div>
+        ) : isSyncing ? (
           <div className="bg-neda-navy text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 animate-in slide-in-from-top-4">
             <Loader2 className="animate-spin" size={12} />
             <span className="text-[8px] font-black uppercase tracking-widest">Syncing to Cloud...</span>
           </div>
-        )}
-        {syncError && (
+        ) : syncError ? (
           <div className="bg-red-500 text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 animate-in slide-in-from-top-4">
             <AlertTriangle size={12} />
-            <span className="text-[8px] font-black uppercase tracking-widest">{syncError}</span>
+            <span className="text-[8px] font-black uppercase tracking-widest truncate max-w-[200px]">{syncError}</span>
             <button onClick={() => setSyncError(null)} className="pointer-events-auto ml-1 bg-white/20 p-1 rounded-full"><X size={8} /></button>
           </div>
-        )}
+        ) : null}
       </div>
 
       {view === 'INVENTORY' && (
@@ -487,7 +482,6 @@ const AdminDashboard: React.FC<{
                   <div className="mt-3 pt-3 border-t border-slate-50 flex items-center justify-between">
                     <div className="flex items-center gap-2">
                        <Lock size={12} className="text-slate-300" />
-                       {/* FIXED: Removed 'uppercase' and 'tracking-widest' to preserve true password casing */}
                        <span className="text-[10px] font-mono font-bold text-neda-navy/40">
                          {showPasswords[user.id] ? user.password : '••••••••'}
                        </span>

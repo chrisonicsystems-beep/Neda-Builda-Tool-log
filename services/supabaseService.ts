@@ -2,19 +2,24 @@
 import { createClient } from '@supabase/supabase-js';
 import { Tool, User } from '../types';
 
-const supabaseUrl = process.env.SUPABASE_URL || '';
-const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || '';
+// Detect environment variables for both local and production (Vite/Vercel)
+const supabaseUrl = process.env.SUPABASE_URL || (window as any).process?.env?.SUPABASE_URL || '';
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || (window as any).process?.env?.SUPABASE_ANON_KEY || '';
 
 export const supabase = supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey) : null;
 
-// Helper to map JS User to DB User (handling case differences)
+if (!supabase) {
+  console.warn("Supabase client failed to initialize. Check your environment variables (SUPABASE_URL and SUPABASE_ANON_KEY).");
+}
+
+// Helper to map JS User to DB User (handling camelCase -> snake_case)
 const mapUserToDb = (user: User) => ({
   id: user.id,
   name: user.name,
   role: user.role,
   email: user.email,
   password: user.password,
-  is_enabled: user.isEnabled // Mapping camelCase to snake_case
+  is_enabled: user.isEnabled
 });
 
 const mapDbToUser = (dbUser: any): User => ({
@@ -23,10 +28,9 @@ const mapDbToUser = (dbUser: any): User => ({
   role: dbUser.role,
   email: dbUser.email,
   password: dbUser.password,
-  isEnabled: dbUser.is_enabled // Mapping snake_case back to camelCase
+  isEnabled: dbUser.is_enabled
 });
 
-// Helper to map JS Tool to DB Tool
 const mapToolToDb = (tool: Tool) => ({
   id: tool.id,
   name: tool.name,
@@ -58,7 +62,7 @@ const mapDbToTool = (dbTool: any): Tool => ({
 });
 
 export const syncTools = async (tools: Tool[]) => {
-  if (!supabase) return;
+  if (!supabase) throw new Error("Supabase client not initialized");
   const dbTools = tools.map(mapToolToDb);
   const { error } = await supabase.from('tools').upsert(dbTools);
   if (error) {
@@ -78,7 +82,7 @@ export const fetchTools = async (): Promise<Tool[] | null> => {
 };
 
 export const syncUsers = async (users: User[]) => {
-  if (!supabase) return;
+  if (!supabase) throw new Error("Supabase client not initialized");
   const dbUsers = users.map(mapUserToDb);
   const { error } = await supabase.from('users').upsert(dbUsers);
   if (error) {
