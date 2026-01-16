@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Tool, ToolStatus, User, UserRole, View, ToolLog } from './types';
 import { INITIAL_USERS, INITIAL_TOOLS } from './mockData';
-import Layout, { NedaLogo } from './components/Layout';
+import Layout, { NedaLogo, LOGO_URL } from './components/Layout';
 import { 
   Search, 
   MapPin, 
@@ -88,7 +88,9 @@ const App: React.FC = () => {
       }
 
       const savedUser = localStorage.getItem('et_user');
-      if (savedUser) setCurrentUser(JSON.parse(savedUser));
+      if (savedUser) {
+        setCurrentUser(JSON.parse(savedUser));
+      }
       setIsInitializing(false);
     };
     initData();
@@ -96,18 +98,24 @@ const App: React.FC = () => {
 
   const handleLogin = (user: User, remember: boolean) => {
     setCurrentUser(user);
-    if (remember) localStorage.setItem('et_user', JSON.stringify(user));
-    if (!localStorage.getItem(`bio_${user.id}`) && window.PublicKeyCredential) setShowBiometricPrompt(true);
+    if (remember) {
+      localStorage.setItem('et_user', JSON.stringify(user));
+      // Trigger prompt if biometrics not already enabled for this user
+      if (!localStorage.getItem(`bio_enabled_${user.id}`)) {
+        setShowBiometricPrompt(true);
+      }
+    }
   };
 
   const handleLogout = () => {
     setCurrentUser(null);
     localStorage.removeItem('et_user');
+    // We don't remove bio settings on logout so they can log back in with bio
   };
 
   const enableBiometrics = () => {
     if (!currentUser) return;
-    localStorage.setItem(`bio_${currentUser.id}`, 'enabled');
+    localStorage.setItem(`bio_enabled_${currentUser.id}`, 'true');
     setShowBiometricPrompt(false);
   };
 
@@ -202,9 +210,9 @@ const App: React.FC = () => {
   if (isInitializing) return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
       <img 
-        src="https://lirp.cdn-website.com/f1362e52/dms3rep/multi/opt/png_Primary-logo-navy-wording--no-bg-04029866-296w.png"
+        src={LOGO_URL}
         alt="Neda Builda"
-        className="w-full max-w-[280px] animate-pulse mb-8"
+        className="w-full max-w-[220px] animate-pulse mb-8"
       />
       <div className="flex items-center gap-2 text-neda-navy font-black uppercase text-[10px] tracking-widest">
          <Loader2 className="animate-spin" size={16} />
@@ -213,7 +221,13 @@ const App: React.FC = () => {
     </div>
   );
 
-  if (!currentUser) return <LoginScreen onLogin={handleLogin} users={allUsers} onResetPassword={handleForgotPassword} />;
+  if (!currentUser) return (
+    <LoginScreen 
+      onLogin={handleLogin} 
+      users={allUsers} 
+      onResetPassword={handleForgotPassword} 
+    />
+  );
 
   return (
     <Layout activeView={view} setView={setView} userRole={currentUser.role} onLogout={handleLogout}>
@@ -256,10 +270,13 @@ const App: React.FC = () => {
       {showBiometricPrompt && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-neda-navy/80 backdrop-blur-md">
           <div className="bg-white w-full max-w-xs rounded-[2.5rem] p-8 text-center space-y-6 shadow-2xl animate-in zoom-in-95">
-             <Fingerprint size={40} className="text-neda-orange mx-auto" />
-             <h3 className="text-lg font-black text-neda-navy uppercase">Enable FaceID?</h3>
-             <button onClick={enableBiometrics} className="w-full py-4 bg-neda-orange text-white rounded-2xl font-black uppercase">Yes, Enable</button>
-             <button onClick={() => setShowBiometricPrompt(false)} className="w-full py-2 text-[10px] font-black text-slate-300 uppercase">Maybe Later</button>
+             <Fingerprint size={48} className="text-neda-orange mx-auto" />
+             <div className="space-y-2">
+               <h3 className="text-lg font-black text-neda-navy uppercase">Enable Fast Sign-in?</h3>
+               <p className="text-[10px] font-bold text-slate-400 uppercase leading-relaxed px-4">Use FaceID or Fingerprint to access Neda Tool instantly next time.</p>
+             </div>
+             <button onClick={enableBiometrics} className="w-full py-4 bg-neda-orange text-white rounded-2xl font-black uppercase tracking-widest active:scale-95 transition-all">Yes, Enable</button>
+             <button onClick={() => setShowBiometricPrompt(false)} className="w-full py-2 text-[10px] font-black text-slate-300 uppercase hover:text-neda-navy transition-colors">Maybe Later</button>
           </div>
         </div>
       )}
@@ -277,12 +294,30 @@ const LoginScreen: React.FC<{
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [showResetModal, setShowResetModal] = useState(false);
+  const [bioUser, setBioUser] = useState<User | null>(null);
 
-  const handleLoginAttempt = (e: React.FormEvent) => {
-    e.preventDefault();
+  useEffect(() => {
+    // Check if there was a previous user who enabled biometrics
+    const saved = localStorage.getItem('et_user');
+    if (saved) {
+      const u = JSON.parse(saved) as User;
+      if (localStorage.getItem(`bio_enabled_${u.id}`)) {
+        setBioUser(u);
+      }
+    }
+  }, []);
+
+  const handleLoginAttempt = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     const user = users.find(u => u.email.toLowerCase() === email.toLowerCase() && u.password === password);
     if (user && user.isEnabled) onLogin(user, true);
     else setError('Invalid credentials or account disabled.');
+  };
+
+  const handleBioLogin = () => {
+    if (!bioUser) return;
+    // Mocking the biometric success
+    onLogin(bioUser, true);
   };
 
   return (
@@ -290,29 +325,70 @@ const LoginScreen: React.FC<{
       <div className="w-full max-w-sm bg-white rounded-[2.5rem] p-8 space-y-8 shadow-2xl border border-slate-100">
         <div className="text-center">
           <img 
-            src="https://lirp.cdn-website.com/f1362e52/dms3rep/multi/opt/png_Primary-logo-navy-wording--no-bg-04029866-296w.png"
+            src={LOGO_URL}
             alt="Neda Builda"
-            className="w-full max-w-[280px] mx-auto mb-2"
+            className="w-full max-w-[200px] mx-auto mb-2"
           />
           <div className="pt-2">
             <span className="text-[10px] font-black text-slate-300 uppercase tracking-[0.25em]">Neda Tool</span>
           </div>
         </div>
-        <form onSubmit={handleLoginAttempt} className="space-y-5">
-          <input type="email" placeholder="Email" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-2 focus:ring-neda-orange transition-all font-semibold" value={email} onChange={e => setEmail(e.target.value)} required />
-          <div className="space-y-4">
-            <input type="password" placeholder="Password" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-2 focus:ring-neda-orange transition-all font-semibold" value={password} onChange={e => setPassword(e.target.value)} required />
-            <button 
-              type="button" 
-              onClick={() => setShowResetModal(true)}
-              className="text-[10px] font-black text-neda-orange uppercase tracking-[0.15em] mx-auto block hover:opacity-70 transition-opacity"
-            >
-              Forgot Password?
-            </button>
+
+        {bioUser ? (
+          <div className="space-y-6 text-center animate-in fade-in zoom-in-95">
+             <div className="space-y-3">
+                <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto border border-slate-100">
+                  <UserIcon size={32} className="text-neda-navy" />
+                </div>
+                <h2 className="font-black text-neda-navy uppercase">Welcome back, {bioUser.name.split(' ')[0]}</h2>
+             </div>
+             <button 
+               onClick={handleBioLogin}
+               className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all flex items-center justify-center gap-3"
+             >
+               <Fingerprint size={20} /> Use Biometrics
+             </button>
+             <button 
+               onClick={() => {
+                 setBioUser(null);
+                 setEmail(bioUser.email);
+               }}
+               className="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-neda-orange transition-colors"
+             >
+               Use different account
+             </button>
           </div>
-          {error && <p className="text-red-500 text-[10px] font-black text-center">{error}</p>}
-          <button type="submit" className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all">Sign In</button>
-        </form>
+        ) : (
+          <form onSubmit={handleLoginAttempt} className="space-y-5">
+            <input 
+              type="email" 
+              placeholder="Email" 
+              className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-2 focus:ring-neda-orange transition-all font-semibold" 
+              value={email} 
+              onChange={e => setEmail(e.target.value)} 
+              required 
+            />
+            <div className="space-y-4">
+              <input 
+                type="password" 
+                placeholder="Password" 
+                className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-2 focus:ring-neda-orange transition-all font-semibold" 
+                value={password} 
+                onChange={e => setPassword(e.target.value)} 
+                required 
+              />
+              <button 
+                type="button" 
+                onClick={() => setShowResetModal(true)}
+                className="text-[10px] font-black text-neda-orange uppercase tracking-[0.15em] mx-auto block hover:opacity-70 transition-opacity"
+              >
+                Forgot Password?
+              </button>
+            </div>
+            {error && <p className="text-red-500 text-[10px] font-black text-center">{error}</p>}
+            <button type="submit" className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all">Sign In</button>
+          </form>
+        )}
       </div>
 
       {showResetModal && <ResetPasswordModal onClose={() => setShowResetModal(false)} onReset={onResetPassword} />}
@@ -816,7 +892,7 @@ const AddToolModal: React.FC<{ onClose: () => void; onAdd: (t: Tool) => Promise<
   };
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-neda-navy/60 backdrop-blur-sm p-4 animate-in fade-in">
-      <form onSubmit={handleSubmit} className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 space-y-5 shadow-2xl scale-in-95 animate-in">
+      <form onSubmit={handleSubmit} className="bg-white w-full max-sm rounded-[2.5rem] p-8 space-y-5 shadow-2xl scale-in-95 animate-in">
         <h2 className="text-xl font-black text-neda-navy uppercase tracking-tight">Register Asset</h2>
         <div className="space-y-4">
           <input type="text" placeholder="Asset Name" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold outline-none" value={name} onChange={e => setName(e.target.value)} required />

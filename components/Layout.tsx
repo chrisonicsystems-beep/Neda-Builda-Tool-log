@@ -9,23 +9,15 @@ import {
 } from 'lucide-react';
 import { View, UserRole } from '../types';
 
+export const LOGO_URL = "https://lirp.cdn-website.com/f1362e52/dms3rep/multi/opt/png_Primary-logo-navy-wording--no-bg-04029866-296w.png";
+
 export const NedaLogo: React.FC<{ size?: number; className?: string }> = ({ size = 40, className = "" }) => (
-  <svg 
-    width={size} 
-    height={size} 
-    viewBox="0 0 100 100" 
-    fill="none" 
-    xmlns="http://www.w3.org/2000/svg"
-    className={className}
-  >
-    <g transform="translate(10, 10) scale(0.85)">
-      <path d="M12 10H41V38H12V10Z" fill="#D15433" />
-      <path d="M12 90V54C12 45.1634 19.1634 38 28 38H41V90H12Z" fill="#D15433" />
-      <path d="M41 38V10C68.6142 10 91 32.3858 91 60V90H63V60C63 47.85 53.15 38 41 38Z" fill="#D15433" />
-      <path d="M12 90V54C12 45.1634 19.1634 38 28 38" stroke="#142948" strokeWidth="6" strokeLinecap="butt" fill="none" />
-      <path d="M63 38V90" stroke="#142948" strokeWidth="6" strokeLinecap="butt" fill="none" />
-    </g>
-  </svg>
+  <img 
+    src={LOGO_URL}
+    alt="Neda Builda"
+    style={{ height: size, width: 'auto' }}
+    className={`object-contain ${className}`}
+  />
 );
 
 interface LayoutProps {
@@ -44,12 +36,12 @@ const Layout: React.FC<LayoutProps> = ({ activeView, setView, userRole, onLogout
       {/* Header */}
       <header className="sticky top-0 z-20 bg-white/90 backdrop-blur-md border-b border-slate-100 px-4 py-3 flex justify-between items-center">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 flex items-center justify-center">
-             <NedaLogo size={36} />
+          <div className="flex items-center">
+             <NedaLogo size={32} />
           </div>
-          <div className="flex flex-col">
-            <h1 className="font-extrabold text-neda-navy tracking-tight leading-none text-lg">Neda Tool</h1>
-            <span className="text-[7px] font-bold text-slate-400 uppercase tracking-widest leading-tight">Powered by <span className="text-neda-orange font-black">Chrisonic Systems</span></span>
+          <div className="flex flex-col border-l border-slate-200 pl-3">
+            <h1 className="font-extrabold text-neda-navy tracking-tight leading-none text-base">Neda Tool</h1>
+            <span className="text-[6px] font-bold text-slate-400 uppercase tracking-widest leading-tight mt-0.5">Powered by <span className="text-neda-orange font-black">Chrisonic Systems</span></span>
           </div>
         </div>
         <button 
