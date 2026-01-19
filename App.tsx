@@ -508,6 +508,41 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onAddUser, onBulkImpor
     window.URL.revokeObjectURL(url);
   };
 
+  const downloadInventoryCSV = () => {
+    const headers = "id,equipment_tool,equipment_type,date_of_purchase,number_of_items,main_photo,current_holder_id,current_holder_name,current_site,status,notes,booked_at,last_returned_at,logs,serial_number";
+    
+    const csvRows = tools.map((t: Tool) => {
+      return [
+        t.id,
+        `"${t.name.replace(/"/g, '""')}"`,
+        `"${t.category.replace(/"/g, '""')}"`,
+        t.dateOfPurchase || '',
+        t.numberOfItems || 1,
+        t.mainPhoto || '',
+        t.currentHolderId || '',
+        `"${(t.currentHolderName || '').replace(/"/g, '""')}"`,
+        `"${(t.currentSite || '').replace(/"/g, '""')}"`,
+        t.status,
+        `"${(t.notes || '').replace(/"/g, '""')}"`,
+        t.bookedAt || '',
+        t.lastReturnedAt || '',
+        `"${JSON.stringify(t.logs).replace(/"/g, '""')}"`,
+        t.serialNumber || ''
+      ].join(',');
+    });
+
+    const csvContent = [headers, ...csvRows].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `neda_inventory_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const handleImport = (e: any) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -518,7 +553,6 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onAddUser, onBulkImpor
       const dataLines = lines.slice(1);
       
       const imported: Tool[] = dataLines.map(line => {
-        // Robust CSV splitting to handle potentially quoted fields with commas
         const regex = /(?:,|\n|^)(?:"([^"]*(?:""[^"]*)*)"|([^,\n]*))/g;
         const parts: string[] = [];
         let match;
@@ -527,23 +561,6 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onAddUser, onBulkImpor
         }
         
         const clean = (p: string) => p?.trim() || '';
-        
-        // Mapped CSV Columns:
-        // 0: id
-        // 1: equipment_tool
-        // 2: equipment_type
-        // 3: date_of_purchase
-        // 4: number_of_items
-        // 5: main_photo
-        // 6: current_holder_id
-        // 7: current_holder_name
-        // 8: current_site
-        // 9: status
-        // 10: notes
-        // 11: booked_at
-        // 12: last_returned_at
-        // 13: logs
-        // 14: serial_number
         
         const logsRaw = clean(parts[13]);
         let parsedLogs: ToolLog[] = [];
@@ -621,6 +638,22 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onAddUser, onBulkImpor
                 <ArrowUpRight size={16} className="text-slate-300 group-hover:text-neda-orange transition-colors" />
               </button>
               <input type="file" ref={fileInputRef} className="hidden" accept=".csv" onChange={handleImport} />
+
+              <button 
+                onClick={downloadInventoryCSV}
+                className="w-full py-6 bg-neda-navy text-white rounded-2xl flex items-center justify-between px-6 shadow-lg active:scale-[0.98] transition-all"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-white/10 rounded-xl">
+                    <Download size={18} className="text-white" />
+                  </div>
+                  <div className="text-left">
+                    <span className="block text-[11px] font-black uppercase tracking-tight">Export Inventory</span>
+                    <span className="block text-[8px] font-bold text-white/50 uppercase mt-0.5">Download current manifest</span>
+                  </div>
+                </div>
+                <FileText size={16} className="text-white/30" />
+              </button>
             </div>
           </div>
         </div>
