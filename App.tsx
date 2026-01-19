@@ -101,10 +101,8 @@ const App: React.FC = () => {
     if (remember) {
       localStorage.setItem('et_user', JSON.stringify(user));
     }
-    // Store last email to identify user for biometrics on next launch
     localStorage.setItem('et_last_email', user.email);
     
-    // Prompt to enable biometrics if not already enabled
     if (localStorage.getItem(`bio_enabled_${user.id}`) !== 'true') {
       setTimeout(() => setShowBiometricPrompt(true), 1200);
     }
@@ -113,8 +111,6 @@ const App: React.FC = () => {
   const handleLogout = () => {
     setCurrentUser(null);
     localStorage.removeItem('et_user');
-    // Important: We do NOT remove the bio_enabled key or last_email here
-    // as those are needed to trigger the "Use Biometrics" button on return.
   };
 
   const enableBiometrics = () => {
@@ -132,7 +128,7 @@ const App: React.FC = () => {
       setSyncError(null);
     } catch (e: any) {
       setSyncError(e.message || "Update Failed");
-      setTools(oldTools); // Revert on failure
+      setTools(oldTools);
     } finally {
       setIsSyncing(false);
     }
@@ -147,25 +143,21 @@ const App: React.FC = () => {
       setSyncError(null);
     } catch (e: any) {
       setSyncError(e.message || "Registration Failed");
-      setTools(oldTools); // Revert on failure
+      setTools(oldTools);
     } finally {
       setIsSyncing(false);
     }
   };
 
   const bulkAddTools = async (newToolsList: Tool[]) => {
-    const oldTools = [...tools];
     const updatedToolsList = [...tools, ...newToolsList];
     setIsSyncing(true);
     try {
-      // Try to sync to DB first
       await syncTools(updatedToolsList);
-      // Only update local UI if DB sync succeeds
       setTools(updatedToolsList);
       setSyncError(null);
     } catch (e: any) {
       setSyncError(`Bulk Sync Error: ${e.message}`);
-      // If DB fails, tools stay as oldTools locally
     } finally {
       setIsSyncing(false);
     }
@@ -224,11 +216,7 @@ const App: React.FC = () => {
 
   if (isInitializing) return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
-      <img 
-        src={LOGO_URL}
-        alt="Neda Builda"
-        className="w-full max-w-[220px] animate-pulse mb-8"
-      />
+      <img src={LOGO_URL} alt="Neda Builda" className="w-full max-w-[220px] animate-pulse mb-8" />
       <div className="flex items-center gap-2 text-neda-navy font-black uppercase text-[10px] tracking-widest">
          <Loader2 className="animate-spin" size={16} />
          <span>Connecting to Chrisonic Network...</span>
@@ -236,13 +224,7 @@ const App: React.FC = () => {
     </div>
   );
 
-  if (!currentUser) return (
-    <LoginScreen 
-      onLogin={handleLogin} 
-      users={allUsers} 
-      onResetPassword={handleForgotPassword} 
-    />
-  );
+  if (!currentUser) return <LoginScreen onLogin={handleLogin} users={allUsers} onResetPassword={handleForgotPassword} />;
 
   return (
     <Layout activeView={view} setView={setView} userRole={currentUser.role} onLogout={handleLogout}>
@@ -274,12 +256,8 @@ const App: React.FC = () => {
           onUpdateTool={updateTool} onAddTool={addTool}
         />
       )}
-      {view === 'MY_TOOLS' && (
-        <MyToolsView tools={tools.filter(t => t.currentHolderId === currentUser.id)} currentUser={currentUser} onUpdateTool={updateTool} />
-      )}
-      {view === 'ADMIN_DASHBOARD' && (
-        <AdminDashboard tools={tools} allUsers={allUsers} currentUser={currentUser} onUpdateUser={updateUser} onAddUser={addUser} onBulkImport={bulkAddTools} />
-      )}
+      {view === 'MY_TOOLS' && <MyToolsView tools={tools.filter(t => t.currentHolderId === currentUser.id)} currentUser={currentUser} onUpdateTool={updateTool} />}
+      {view === 'ADMIN_DASHBOARD' && <AdminDashboard tools={tools} allUsers={allUsers} currentUser={currentUser} onUpdateUser={updateUser} onAddUser={addUser} onBulkImport={bulkAddTools} />}
       {view === 'AI_ASSISTANT' && ( <AIAssistant tools={tools} /> )}
 
       {showBiometricPrompt && (
@@ -299,7 +277,6 @@ const App: React.FC = () => {
   );
 };
 
-// --- Login Screen ---
 const LoginScreen: React.FC<{ 
   onLogin: (u: User, rem: boolean) => void; 
   users: User[];
@@ -313,11 +290,9 @@ const LoginScreen: React.FC<{
   const [bioUser, setBioUser] = useState<User | null>(null);
 
   useEffect(() => {
-    // Check if there was a previous user who enabled biometrics
     const lastEmail = localStorage.getItem('et_last_email');
     if (lastEmail && users.length > 0) {
       const foundUser = users.find(u => u.email.toLowerCase() === lastEmail.toLowerCase());
-      // Only show bio login if they explicitly enabled it and we recognize the account
       if (foundUser && localStorage.getItem(`bio_enabled_${foundUser.id}`) === 'true') {
         setBioUser(foundUser);
       }
@@ -336,7 +311,6 @@ const LoginScreen: React.FC<{
 
   const handleBioLogin = () => {
     if (!bioUser) return;
-    // Emulate biometric success
     onLogin(bioUser, true);
   };
 
@@ -344,81 +318,36 @@ const LoginScreen: React.FC<{
     <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6">
       <div className="w-full max-w-sm bg-white rounded-[2.5rem] p-8 space-y-8 shadow-2xl border border-slate-100">
         <div className="text-center">
-          <img 
-            src={LOGO_URL}
-            alt="Neda Builda"
-            className="w-full max-w-[200px] mx-auto mb-2"
-          />
+          <img src={LOGO_URL} alt="Neda Builda" className="w-full max-w-[200px] mx-auto mb-2" />
           <div className="pt-2">
             <span className="text-[10px] font-black text-slate-300 uppercase tracking-[0.25em]">Neda Tool</span>
           </div>
         </div>
-
         {bioUser ? (
           <div className="space-y-6 text-center animate-in fade-in zoom-in-95">
              <div className="space-y-3">
-                <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto border border-slate-100">
-                  <UserIcon size={32} className="text-neda-navy" />
-                </div>
+                <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto border border-slate-100"><UserIcon size={32} className="text-neda-navy" /></div>
                 <div className="space-y-1">
                   <h2 className="font-black text-neda-navy uppercase">Welcome back</h2>
                   <p className="text-xs font-bold text-neda-orange uppercase tracking-wider">{bioUser.name}</p>
                 </div>
              </div>
              <div className="space-y-3">
-               <button 
-                 onClick={handleBioLogin}
-                 className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all flex items-center justify-center gap-3"
-               >
-                 <Fingerprint size={20} /> Use FaceID / TouchID
-               </button>
-               <button 
-                 onClick={() => {
-                   setBioUser(null);
-                   setEmail(bioUser.email);
-                 }}
-                 className="w-full py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-neda-orange transition-colors"
-               >
-                 Use different account
-               </button>
+               <button onClick={handleBioLogin} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all flex items-center justify-center gap-3"><Fingerprint size={20} /> Use FaceID / TouchID</button>
+               <button onClick={() => { setBioUser(null); setEmail(bioUser.email); }} className="w-full py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-neda-orange transition-colors">Use different account</button>
              </div>
           </div>
         ) : (
           <form onSubmit={handleLoginAttempt} className="space-y-5">
-            <input 
-              type="email" 
-              placeholder="Work Email" 
-              className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-2 focus:ring-neda-orange transition-all font-semibold" 
-              value={email} 
-              onChange={e => setEmail(e.target.value)} 
-              required 
-            />
+            <input type="email" placeholder="Work Email" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-2 focus:ring-neda-orange transition-all font-semibold" value={email} onChange={e => setEmail(e.target.value)} required />
             <div className="space-y-4">
-              <input 
-                type="password" 
-                placeholder="Password" 
-                className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-2 focus:ring-neda-orange transition-all font-semibold" 
-                value={password} 
-                onChange={e => setPassword(e.target.value)} 
-                required 
-              />
+              <input type="password" placeholder="Password" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-2 focus:ring-neda-orange transition-all font-semibold" value={password} onChange={e => setPassword(e.target.value)} required />
               <div className="flex items-center justify-between px-1">
                 <label className="flex items-center gap-2 cursor-pointer group">
-                  <input 
-                    type="checkbox" 
-                    checked={rememberMe}
-                    onChange={(e) => setRememberMe(e.target.checked)}
-                    className="w-4 h-4 rounded border-slate-200 text-neda-orange focus:ring-neda-orange cursor-pointer"
-                  />
+                  <input type="checkbox" checked={rememberMe} onChange={(e) => setRememberMe(e.target.checked)} className="w-4 h-4 rounded border-slate-200 text-neda-orange focus:ring-neda-orange cursor-pointer" />
                   <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest group-hover:text-neda-navy transition-colors">Remember Me</span>
                 </label>
-                <button 
-                  type="button" 
-                  onClick={() => setShowResetModal(true)}
-                  className="text-[10px] font-black text-neda-orange uppercase tracking-[0.15em] hover:opacity-70 transition-opacity"
-                >
-                  Forgot?
-                </button>
+                <button type="button" onClick={() => setShowResetModal(true)} className="text-[10px] font-black text-neda-orange uppercase tracking-[0.15em] hover:opacity-70 transition-opacity">Forgot?</button>
               </div>
             </div>
             {error && <p className="text-red-500 text-[10px] font-black text-center">{error}</p>}
@@ -426,7 +355,6 @@ const LoginScreen: React.FC<{
           </form>
         )}
       </div>
-
       {showResetModal && <ResetPasswordModal onClose={() => setShowResetModal(false)} onReset={onResetPassword} />}
     </div>
   );
@@ -461,28 +389,16 @@ const ResetPasswordModal: React.FC<{ onClose: () => void; onReset: (email: strin
           <h3 className="text-xl font-black text-neda-navy uppercase">Reset Password</h3>
           <button onClick={onClose} className="p-2 bg-slate-50 rounded-xl"><X size={18} /></button>
         </div>
-        
         {status !== 'success' ? (
           <form onSubmit={handleSubmit} className="space-y-5">
             <p className="text-xs text-slate-500 font-medium text-center">Enter your work email and we'll reset your password to a default value.</p>
-            <input 
-              type="email" 
-              placeholder="Work Email" 
-              className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-2 focus:ring-neda-orange font-bold text-sm" 
-              value={email} 
-              onChange={e => setEmail(e.target.value)} 
-              required 
-            />
+            <input type="email" placeholder="Work Email" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-2 focus:ring-neda-orange font-bold text-sm" value={email} onChange={e => setEmail(e.target.value)} required />
             {status === 'error' && <p className="text-red-500 text-[10px] font-black text-center">{msg}</p>}
-            <button type="submit" disabled={loading} className="w-full py-4 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest flex items-center justify-center gap-2">
-              {loading ? <Loader2 className="animate-spin" size={18} /> : "Reset My Password"}
-            </button>
+            <button type="submit" disabled={loading} className="w-full py-4 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest flex items-center justify-center gap-2">{loading ? <Loader2 className="animate-spin" size={18} /> : "Reset My Password"}</button>
           </form>
         ) : (
           <div className="space-y-5 text-center py-4">
-            <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-2">
-              <CheckCircle2 size={32} />
-            </div>
+            <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-2"><CheckCircle2 size={32} /></div>
             <p className="text-xs font-bold text-slate-700">{msg}</p>
             <button onClick={onClose} className="w-full py-4 bg-neda-navy text-white rounded-2xl font-black uppercase">Got it</button>
           </div>
@@ -501,7 +417,6 @@ const InventoryView: React.FC<{
 }> = ({ tools, allTools, searchTerm, setSearchTerm, statusFilter, setStatusFilter, userFilter, setUserFilter, showFilters, setShowFilters, currentUser, onUpdateTool, onAddTool }) => {
   const [selectedTool, setSelectedTool] = useState<Tool | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
-  
   const canManage = currentUser.role === UserRole.ADMIN || currentUser.role === UserRole.MANAGER;
 
   return (
@@ -522,15 +437,9 @@ const InventoryView: React.FC<{
           </select>
         </div>
       )}
-      {canManage && (
-        <button onClick={() => setShowAddModal(true)} className="w-full py-4 border-2 border-dashed border-neda-orange/30 text-neda-orange rounded-2xl flex items-center justify-center gap-3 font-black text-xs uppercase hover:bg-neda-orange/5 transition-colors"><Plus size={20} /> Register New Equipment</button>
-      )}
+      {canManage && <button onClick={() => setShowAddModal(true)} className="w-full py-4 border-2 border-dashed border-neda-orange/30 text-neda-orange rounded-2xl flex items-center justify-center gap-3 font-black text-xs uppercase hover:bg-neda-orange/5 transition-colors"><Plus size={20} /> Register New Equipment</button>}
       <div className="grid gap-4">
-        {tools.length === 0 ? (
-          <div className="text-center py-10 opacity-40 font-black text-xs uppercase tracking-widest">No matching assets found</div>
-        ) : (
-          tools.map(tool => ( <ToolCard key={tool.id} tool={tool} onClick={() => setSelectedTool(tool)} /> ))
-        )}
+        {tools.length === 0 ? <div className="text-center py-10 opacity-40 font-black text-xs uppercase tracking-widest">No matching assets found</div> : tools.map(tool => <ToolCard key={tool.id} tool={tool} onClick={() => setSelectedTool(tool)} />)}
       </div>
       {selectedTool && <ToolModal tool={selectedTool} onClose={() => setSelectedTool(null)} currentUser={currentUser} onUpdate={async (t) => { await onUpdateTool(t); setSelectedTool(null); }} />}
       {showAddModal && <AddToolModal onClose={() => setShowAddModal(false)} onAdd={async (t) => { await onAddTool(t); setShowAddModal(false); }} currentUser={currentUser} />}
@@ -549,20 +458,13 @@ const MyToolsView: React.FC<{ tools: Tool[]; currentUser: User; onUpdateTool: (t
       </div>
       <div className="grid gap-4">
         {tools.length === 0 ? (
-          <div className="text-center py-20 bg-white rounded-3xl border border-dashed border-slate-200">
-            <Package size={32} className="mx-auto text-slate-200 mb-3" />
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">No tools booked out</p>
-          </div>
-        ) : (
-          tools.map(tool => ( <ToolCard key={tool.id} tool={tool} onClick={() => setSelectedTool(tool)} /> ))
-        )}
+          <div className="text-center py-20 bg-white rounded-3xl border border-dashed border-slate-200"><Package size={32} className="mx-auto text-slate-200 mb-3" /><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">No tools booked out</p></div>
+        ) : tools.map(tool => <ToolCard key={tool.id} tool={tool} onClick={() => setSelectedTool(tool)} />)}
       </div>
       {selectedTool && <ToolModal tool={selectedTool} onClose={() => setSelectedTool(null)} currentUser={currentUser} onUpdate={async (t) => { await onUpdateTool(t); setSelectedTool(null); }} />}
     </div>
   );
 };
-
-// --- Fixes for missing components: AddUserModal and EditUserModal ---
 
 const AddUserModal: React.FC<{ onClose: () => void; onAdd: (u: User) => Promise<void> }> = ({ onClose, onAdd }) => {
   const [name, setName] = useState('');
@@ -574,42 +476,20 @@ const AddUserModal: React.FC<{ onClose: () => void; onAdd: (u: User) => Promise<
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    try {
-      await onAdd({
-        id: 'U' + Math.random().toString(36).substr(2, 5).toUpperCase(),
-        name,
-        email,
-        role,
-        password,
-        isEnabled: true
-      });
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
+    try { await onAdd({ id: 'U' + Math.random().toString(36).substr(2, 5).toUpperCase(), name, email, role, password, isEnabled: true }); } catch (err) { console.error(err); } finally { setLoading(false); }
   };
 
   return (
     <div className="fixed inset-0 z-[110] flex items-center justify-center bg-neda-navy/60 backdrop-blur-sm p-4 animate-in fade-in">
       <form onSubmit={handleSubmit} className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 space-y-5 shadow-2xl scale-in-95 animate-in">
-        <div className="flex justify-between items-center">
-          <h2 className="text-xl font-black text-neda-navy uppercase tracking-tight">Register User</h2>
-          <button type="button" onClick={onClose} className="p-2 bg-slate-50 rounded-xl"><X size={18} /></button>
-        </div>
+        <div className="flex justify-between items-center"><h2 className="text-xl font-black text-neda-navy uppercase tracking-tight">Register User</h2><button type="button" onClick={onClose} className="p-2 bg-slate-50 rounded-xl"><X size={18} /></button></div>
         <div className="space-y-4">
           <input type="text" placeholder="Full Name" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold outline-none" value={name} onChange={e => setName(e.target.value)} required />
           <input type="email" placeholder="Email Address" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold outline-none" value={email} onChange={e => setEmail(e.target.value)} required />
-          <select className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-xs font-black uppercase" value={role} onChange={e => setRole(e.target.value as UserRole)}>
-             <option value={UserRole.USER}>User</option>
-             <option value={UserRole.MANAGER}>Manager</option>
-             <option value={UserRole.ADMIN}>Admin</option>
-          </select>
+          <select className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-xs font-black uppercase" value={role} onChange={e => setRole(e.target.value as UserRole)}><option value={UserRole.USER}>User</option><option value={UserRole.MANAGER}>Manager</option><option value={UserRole.ADMIN}>Admin</option></select>
           <input type="text" placeholder="Initial Password" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold outline-none" value={password} onChange={e => setPassword(e.target.value)} required />
         </div>
-        <button type="submit" disabled={loading} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2">
-           {loading ? <Loader2 className="animate-spin" size={18} /> : "Create Account"}
-        </button>
+        <button type="submit" disabled={loading} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2">{loading ? <Loader2 className="animate-spin" size={18} /> : "Create Account"}</button>
       </form>
     </div>
   );
@@ -624,43 +504,19 @@ const EditUserModal: React.FC<{ user: User; onClose: () => void; onUpdate: (u: U
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    try {
-      await onUpdate({ ...user, name, role, password });
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
+    try { await onUpdate({ ...user, name, role, password }); } catch (err) { console.error(err); } finally { setLoading(false); }
   };
 
   return (
     <div className="fixed inset-0 z-[110] flex items-center justify-center bg-neda-navy/60 backdrop-blur-sm p-4 animate-in fade-in">
       <form onSubmit={handleSubmit} className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 space-y-5 shadow-2xl scale-in-95 animate-in">
-        <div className="flex justify-between items-center">
-          <h2 className="text-xl font-black text-neda-navy uppercase tracking-tight">Edit Personnel</h2>
-          <button type="button" onClick={onClose} className="p-2 bg-slate-50 rounded-xl"><X size={18} /></button>
-        </div>
+        <div className="flex justify-between items-center"><h2 className="text-xl font-black text-neda-navy uppercase tracking-tight">Edit Personnel</h2><button type="button" onClick={onClose} className="p-2 bg-slate-50 rounded-xl"><X size={18} /></button></div>
         <div className="space-y-4">
-          <div className="space-y-1">
-            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Name</label>
-            <input type="text" placeholder="Full Name" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold outline-none" value={name} onChange={e => setName(e.target.value)} required />
-          </div>
-          <div className="space-y-1">
-            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Access Level</label>
-            <select className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-xs font-black uppercase" value={role} onChange={e => setRole(e.target.value as UserRole)}>
-               <option value={UserRole.USER}>User</option>
-               <option value={UserRole.MANAGER}>Manager</option>
-               <option value={UserRole.ADMIN}>Admin</option>
-            </select>
-          </div>
-          <div className="space-y-1">
-            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Update Password</label>
-            <input type="text" placeholder="Password" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold outline-none" value={password} onChange={e => setPassword(e.target.value)} />
-          </div>
+          <div className="space-y-1"><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Name</label><input type="text" placeholder="Full Name" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold outline-none" value={name} onChange={e => setName(e.target.value)} required /></div>
+          <div className="space-y-1"><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Access Level</label><select className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-xs font-black uppercase" value={role} onChange={e => setRole(e.target.value as UserRole)}><option value={UserRole.USER}>User</option><option value={UserRole.MANAGER}>Manager</option><option value={UserRole.ADMIN}>Admin</option></select></div>
+          <div className="space-y-1"><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Update Password</label><input type="text" placeholder="Password" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold outline-none" value={password} onChange={e => setPassword(e.target.value)} /></div>
         </div>
-        <button type="submit" disabled={loading} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2">
-           {loading ? <Loader2 className="animate-spin" size={18} /> : "Update Personnel"}
-        </button>
+        <button type="submit" disabled={loading} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2">{loading ? <Loader2 className="animate-spin" size={18} /> : "Update Personnel"}</button>
       </form>
     </div>
   );
@@ -677,16 +533,11 @@ const AdminDashboard: React.FC<{
   const [showPasswords, setShowPasswords] = useState<Record<string, boolean>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const togglePasswordVisibility = (userId: string) => {
-    setShowPasswords(prev => ({ ...prev, [userId]: !prev[userId] }));
-  };
+  const togglePasswordVisibility = (userId: string) => { setShowPasswords(prev => ({ ...prev, [userId]: !prev[userId] })); };
 
   const exportCSV = () => {
     const headers = ['Asset ID', 'Name', 'Category', 'Serial', 'Status', 'Current Holder', 'Current Site'];
-    const rows = tools.map(t => [
-      t.id, t.name, t.category || 'General', t.serialNumber || '', t.status, 
-      t.currentHolderName || 'Warehouse', t.currentSite || 'Warehouse'
-    ]);
+    const rows = tools.map(t => [t.id, t.name, t.category || 'General', t.serialNumber || '', t.status, t.currentHolderName || 'Warehouse', t.currentSite || 'Warehouse']);
     const csvContent = [headers, ...rows].map(e => e.join(",")).join("\n");
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
@@ -701,136 +552,61 @@ const AdminDashboard: React.FC<{
     const reader = new FileReader();
     reader.onload = (event) => {
       const text = event.target?.result as string;
-      const lines = text.split("\n").slice(1);
-      const newTools: Tool[] = lines.filter(line => line.trim()).map(line => {
-        const parts = line.split(",");
+      const lines = text.split(/\r?\n/).filter(l => l.trim());
+      const dataLines = lines.slice(1);
+      
+      const newTools: Tool[] = dataLines.map(line => {
+        // Robust split that respects quotes (for dates like "Jan 19, 2024")
+        const parts = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+        const clean = (p: string) => p?.replace(/^"|"$/g, '').trim() || '';
+        
+        const statusMap = (s: string) => {
+          const val = clean(s).toLowerCase();
+          if (val.includes('field') || val.includes('out')) return ToolStatus.BOOKED_OUT;
+          return ToolStatus.AVAILABLE;
+        };
+
         return {
-          id: parts[0]?.trim() || 'T' + Math.random().toString(36).substr(2, 5).toUpperCase(),
-          name: parts[1]?.trim() || 'Unknown Asset',
-          category: parts[2]?.trim() || 'General',
-          serialNumber: parts[3]?.trim() || '',
-          status: ToolStatus.AVAILABLE,
+          id: clean(parts[0]) || 'T' + Math.random().toString(36).substr(2, 5).toUpperCase(),
+          name: clean(parts[1]) || 'Unnamed Asset',
+          category: clean(parts[2]) || 'General',
+          mainPhoto: clean(parts[5]) || undefined,
+          currentHolderId: clean(parts[6]) || undefined,
+          currentHolderName: clean(parts[7]) || undefined,
+          currentSite: clean(parts[8]) || undefined,
+          status: statusMap(parts[9]),
           logs: []
         };
       });
       onBulkImport(newTools);
-      alert(`${newTools.length} assets merged into inventory.`);
     };
     reader.readAsText(file);
   };
 
   return (
     <div className="space-y-6">
-      <div className="flex gap-2 bg-slate-100 p-1 rounded-2xl">
-        <button onClick={() => setActiveTab('REPORTS')} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${activeTab === 'REPORTS' ? 'bg-white text-neda-navy shadow-sm' : 'text-slate-400'}`}>Stocktake</button>
-        <button onClick={() => setActiveTab('USERS')} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${activeTab === 'USERS' ? 'bg-white text-neda-navy shadow-sm' : 'text-slate-400'}`}>Personnel</button>
-      </div>
-
+      <div className="flex gap-2 bg-slate-100 p-1 rounded-2xl"><button onClick={() => setActiveTab('REPORTS')} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${activeTab === 'REPORTS' ? 'bg-white text-neda-navy shadow-sm' : 'text-slate-400'}`}>Stocktake</button><button onClick={() => setActiveTab('USERS')} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${activeTab === 'USERS' ? 'bg-white text-neda-navy shadow-sm' : 'text-slate-400'}`}>Personnel</button></div>
       {activeTab === 'REPORTS' && (
         <div className="space-y-6 animate-in fade-in duration-300">
-          <div className="grid grid-cols-2 gap-4">
-            <StatCard label="Total Assets" value={tools.length} color="bg-neda-navy" />
-            <StatCard label="In Field" value={tools.filter(t => t.status === ToolStatus.BOOKED_OUT).length} color="bg-neda-orange" />
-          </div>
-          
-          <div className="bg-white border border-slate-100 p-6 rounded-[2rem] space-y-4 shadow-sm">
-             <div className="flex items-center gap-2 mb-2">
-                <FileText size={16} className="text-neda-orange" />
-                <h3 className="text-[10px] font-black text-neda-navy uppercase tracking-widest">Master Sheet Controls</h3>
-             </div>
-             <div className="grid grid-cols-1 gap-3">
-                <button onClick={exportCSV} className="w-full py-4 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-between px-6 hover:border-neda-orange transition-all group">
-                   <div className="flex items-center gap-3">
-                      <Download size={18} className="text-neda-navy group-hover:text-neda-orange" />
-                      <span className="text-xs font-black text-neda-navy uppercase">Export Stocktake (CSV)</span>
-                   </div>
-                   <ArrowUpRight size={16} className="text-slate-300" />
-                </button>
-                <button onClick={() => fileInputRef.current?.click()} className="w-full py-4 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-between px-6 hover:border-neda-orange transition-all group">
-                   <div className="flex items-center gap-3">
-                      <Upload size={18} className="text-neda-navy group-hover:text-neda-orange" />
-                      <span className="text-xs font-black text-neda-navy uppercase">Bulk Upload Assets</span>
-                   </div>
-                   <ArrowUpRight size={16} className="text-slate-300" />
-                </button>
-                <input type="file" ref={fileInputRef} className="hidden" accept=".csv" onChange={handleImport} />
-             </div>
-          </div>
+          <div className="grid grid-cols-2 gap-4"><StatCard label="Total Assets" value={tools.length} color="bg-neda-navy" /><StatCard label="In Field" value={tools.filter(t => t.status === ToolStatus.BOOKED_OUT).length} color="bg-neda-orange" /></div>
+          <div className="bg-white border border-slate-100 p-6 rounded-[2rem] space-y-4 shadow-sm"><div className="flex items-center gap-2 mb-2"><FileText size={16} className="text-neda-orange" /><h3 className="text-[10px] font-black text-neda-navy uppercase tracking-widest">Master Sheet Controls</h3></div><div className="grid grid-cols-1 gap-3"><button onClick={exportCSV} className="w-full py-4 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-between px-6 hover:border-neda-orange transition-all group"><div className="flex items-center gap-3"><Download size={18} className="text-neda-navy group-hover:text-neda-orange" /><span className="text-xs font-black text-neda-navy uppercase">Export Stocktake (CSV)</span></div><ArrowUpRight size={16} className="text-slate-300" /></button><button onClick={() => fileInputRef.current?.click()} className="w-full py-4 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-between px-6 hover:border-neda-orange transition-all group"><div className="flex items-center gap-3"><Upload size={18} className="text-neda-navy group-hover:text-neda-orange" /><span className="text-xs font-black text-neda-navy uppercase">Bulk Upload Assets</span></div><ArrowUpRight size={16} className="text-slate-300" /></button><input type="file" ref={fileInputRef} className="hidden" accept=".csv" onChange={handleImport} /></div></div>
         </div>
       )}
-
       {activeTab === 'USERS' && (
-        <div className="space-y-4 animate-in fade-in duration-300">
-           <button onClick={() => setShowUserModal(true)} className="w-full py-4 bg-white border-2 border-dashed border-neda-navy/20 text-neda-navy rounded-2xl flex items-center justify-center gap-3 font-black text-xs uppercase hover:bg-slate-50 transition-colors">
-              <UserPlus size={18} /> Register Personnel
-           </button>
-           <div className="grid gap-3">
-             {allUsers.map(user => (
-               <div key={user.id} className="bg-white border border-slate-100 p-4 rounded-2xl shadow-sm relative overflow-hidden group">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                       <div className="w-10 h-10 bg-neda-lightNavy rounded-full flex items-center justify-center font-black text-neda-navy text-sm uppercase">{user.name.charAt(0)}</div>
-                       <div>
-                          <p className="text-sm font-black text-neda-navy uppercase tracking-tight">{user.name}</p>
-                          <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{user.role} • {user.email}</p>
-                       </div>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <button onClick={() => setEditingUser(user)} className="p-2 text-slate-300 hover:text-neda-navy transition-colors">
-                        <Edit size={16} />
-                      </button>
-                      <button onClick={() => onUpdateUser({...user, isEnabled: !user.isEnabled})} className={`p-2 transition-colors ${user.isEnabled ? 'text-green-500 hover:bg-green-50 rounded-xl' : 'text-slate-200 hover:bg-slate-50 rounded-xl'}`}>
-                        {user.isEnabled ? <CheckCircle2 size={18} /> : <Trash2 size={18} />}
-                      </button>
-                    </div>
-                  </div>
-                  <div className="mt-3 pt-3 border-t border-slate-50 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                       <Lock size={12} className="text-slate-300" />
-                       <span className="text-[10px] font-mono font-bold text-neda-navy/40">
-                         {showPasswords[user.id] ? user.password : '••••••••'}
-                       </span>
-                    </div>
-                    <button onClick={() => togglePasswordVisibility(user.id)} className="text-[9px] font-black text-neda-orange uppercase tracking-widest">
-                      {showPasswords[user.id] ? 'Hide' : 'Reveal'}
-                    </button>
-                  </div>
-               </div>
-             ))}
-           </div>
-        </div>
+        <div className="space-y-4 animate-in fade-in duration-300"><button onClick={() => setShowUserModal(true)} className="w-full py-4 bg-white border-2 border-dashed border-neda-navy/20 text-neda-navy rounded-2xl flex items-center justify-center gap-3 font-black text-xs uppercase hover:bg-slate-50 transition-colors"><UserPlus size={18} /> Register Personnel</button><div className="grid gap-3">{allUsers.map(user => (<div key={user.id} className="bg-white border border-slate-100 p-4 rounded-2xl shadow-sm relative overflow-hidden group"><div className="flex items-center justify-between"><div className="flex items-center gap-3"><div className="w-10 h-10 bg-neda-lightNavy rounded-full flex items-center justify-center font-black text-neda-navy text-sm uppercase">{user.name.charAt(0)}</div><div><p className="text-sm font-black text-neda-navy uppercase tracking-tight">{user.name}</p><p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{user.role} • {user.email}</p></div></div><div className="flex items-center gap-1"><button onClick={() => setEditingUser(user)} className="p-2 text-slate-300 hover:text-neda-navy transition-colors"><Edit size={16} /></button><button onClick={() => onUpdateUser({...user, isEnabled: !user.isEnabled})} className={`p-2 transition-colors ${user.isEnabled ? 'text-green-500 hover:bg-green-50 rounded-xl' : 'text-slate-200 hover:bg-slate-50 rounded-xl'}`}>{user.isEnabled ? <CheckCircle2 size={18} /> : <Trash2 size={18} />}</button></div></div><div className="mt-3 pt-3 border-t border-slate-50 flex items-center justify-between"><div className="flex items-center gap-2"><Lock size={12} className="text-slate-300" /><span className="text-[10px] font-mono font-bold text-neda-navy/40">{showPasswords[user.id] ? user.password : '••••••••'}</span></div><button onClick={() => togglePasswordVisibility(user.id)} className="text-[9px] font-black text-neda-orange uppercase tracking-widest">{showPasswords[user.id] ? 'Hide' : 'Reveal'}</button></div></div>))}</div></div>
       )}
-
       {showUserModal && <AddUserModal onClose={() => setShowUserModal(false)} onAdd={async (u) => { await onAddUser(u); setShowUserModal(false); }} />}
       {editingUser && <EditUserModal user={editingUser} onClose={() => setEditingUser(null)} onUpdate={async (u) => { await onUpdateUser(u); setEditingUser(null); }} />}
     </div>
   );
 };
 
-const StatCard: React.FC<{ label: string; value: number; color: string }> = ({ label, value, color }) => (
-  <div className={`${color} p-6 rounded-[2rem] text-white relative overflow-hidden shadow-md`}>
-    <p className="text-[9px] font-black uppercase tracking-widest opacity-60 leading-none">{label}</p>
-    <h3 className="text-3xl font-black mt-1 leading-none">{value}</h3>
-    <div className="absolute -bottom-4 -right-4 w-16 h-16 bg-white opacity-10 rounded-full blur-xl"></div>
-  </div>
-);
+const StatCard: React.FC<{ label: string; value: number; color: string }> = ({ label, value, color }) => (<div className={`${color} p-6 rounded-[2rem] text-white relative overflow-hidden shadow-md`}><p className="text-[9px] font-black uppercase tracking-widest opacity-60 leading-none">{label}</p><h3 className="text-3xl font-black mt-1 leading-none">{value}</h3><div className="absolute -bottom-4 -right-4 w-16 h-16 bg-white opacity-10 rounded-full blur-xl"></div></div>);
 
 const ToolCard: React.FC<{ tool: Tool; onClick: () => void }> = ({ tool, onClick }) => (
   <button onClick={onClick} className="w-full text-left bg-white p-5 rounded-[1.5rem] border border-slate-100 shadow-sm hover:shadow-md transition-all active:scale-[0.98] group">
-    <div className="flex justify-between items-start mb-3">
-      <div className="flex gap-4">
-        <div className="w-12 h-12 rounded-xl bg-slate-50 flex items-center justify-center group-hover:bg-neda-lightOrange transition-colors"><Package size={20} className="text-neda-navy/20 group-hover:text-neda-orange transition-colors" /></div>
-        <div>
-          <h4 className="font-black text-neda-navy uppercase text-sm tracking-tight">{tool.name}</h4>
-          {tool.serialNumber && <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-1">SN: {tool.serialNumber}</p>}
-        </div>
-      </div>
-      <StatusBadge status={tool.status} />
-    </div>
-    <div className="mt-4 pt-3 border-t border-slate-50 flex items-center justify-between text-[10px] font-bold uppercase text-neda-navy/60">
-      <div className="flex items-center gap-2">{tool.status === ToolStatus.BOOKED_OUT ? <><UserIcon size={14} className="text-neda-orange" /> {tool.currentHolderName}</> : <span className="opacity-40">{tool.category || 'General'}</span>}</div>
-      {tool.status === ToolStatus.BOOKED_OUT && <div className="flex items-center gap-2"><MapPin size={14} className="text-slate-300" /> {tool.currentSite}</div>}
-    </div>
+    <div className="flex justify-between items-start mb-3"><div className="flex gap-4"><div className="w-12 h-12 rounded-xl bg-slate-50 flex items-center justify-center group-hover:bg-neda-lightOrange transition-colors"><Package size={20} className="text-neda-navy/20 group-hover:text-neda-orange transition-colors" /></div><div><h4 className="font-black text-neda-navy uppercase text-sm tracking-tight">{tool.name}</h4>{tool.serialNumber && <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-1">SN: {tool.serialNumber}</p>}</div></div><StatusBadge status={tool.status} /></div>
+    <div className="mt-4 pt-3 border-t border-slate-50 flex items-center justify-between text-[10px] font-bold uppercase text-neda-navy/60"><div className="flex items-center gap-2">{tool.status === ToolStatus.BOOKED_OUT ? <><UserIcon size={14} className="text-neda-orange" /> {tool.currentHolderName}</> : <span className="opacity-40">{tool.category || 'General'}</span>}</div>{tool.status === ToolStatus.BOOKED_OUT && <div className="flex items-center gap-2"><MapPin size={14} className="text-slate-300" /> {tool.currentSite}</div>}</div>
   </button>
 );
 
@@ -853,42 +629,10 @@ const ToolModal: React.FC<{ tool: Tool; onClose: () => void; currentUser: User; 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-neda-navy/60 backdrop-blur-sm p-0 sm:p-4">
       <div className="bg-white w-full max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 shadow-2xl relative max-h-[90vh] overflow-y-auto animate-in slide-in-from-bottom-10 sm:slide-in-from-bottom-0">
-        <div className="flex justify-between items-center mb-6">
-           <div>
-            <h2 className="text-xl font-black text-neda-navy uppercase tracking-tighter">{tool.name}</h2>
-            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">Asset ID: {tool.id}</p>
-           </div>
-           <button onClick={onClose} className="p-2 bg-slate-50 rounded-xl"><X size={20} /></button>
-        </div>
-        {action === 'IDLE' && (
-          <div className="space-y-6">
-            <div className="flex justify-between items-center">
-              <StatusBadge status={tool.status} />
-              <span className="text-[10px] font-black text-slate-300 uppercase">{tool.category || 'General'}</span>
-            </div>
-            {tool.status === ToolStatus.AVAILABLE && <button onClick={() => setAction('BOOKING')} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest active:scale-95 transition-all">Assign to Site</button>}
-            {tool.status === ToolStatus.BOOKED_OUT && tool.currentHolderId === currentUser.id && <button onClick={() => setAction('RETURNING')} className="w-full py-5 bg-green-600 text-white rounded-2xl font-black uppercase tracking-widest active:scale-95 transition-all">Confirm Return</button>}
-          </div>
-        )}
-        {action === 'BOOKING' && (
-          <div className="space-y-4 animate-in slide-in-from-right-4">
-             <div className="space-y-1">
-                <label className="text-[9px] font-black text-neda-navy/40 uppercase tracking-widest ml-1">Site Location</label>
-                <input type="text" placeholder="e.g. Waterfront Project" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm outline-none" value={site} onChange={e => setSite(e.target.value)} />
-             </div>
-             <button onClick={handleBooking} disabled={!site || loading} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest disabled:opacity-50 active:scale-95 transition-all flex items-center justify-center gap-2">
-                {loading && <Loader2 className="animate-spin" size={18} />} Assign Deployment
-             </button>
-          </div>
-        )}
-        {action === 'RETURNING' && (
-          <div className="space-y-4 animate-in slide-in-from-right-4">
-             <p className="text-xs font-bold text-neda-navy/60 text-center px-4">Confirming the return of this asset to the Neda Builda Warehouse.</p>
-             <button onClick={handleReturn} disabled={loading} className="w-full py-5 bg-green-600 text-white rounded-2xl font-black uppercase tracking-widest active:scale-95 transition-all flex items-center justify-center gap-2">
-                {loading && <Loader2 className="animate-spin" size={18} />} Process Return
-             </button>
-          </div>
-        )}
+        <div className="flex justify-between items-center mb-6"><div><h2 className="text-xl font-black text-neda-navy uppercase tracking-tighter">{tool.name}</h2><p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">Asset ID: {tool.id}</p></div><button onClick={onClose} className="p-2 bg-slate-50 rounded-xl"><X size={20} /></button></div>
+        {action === 'IDLE' && (<div className="space-y-6"><div className="flex justify-between items-center"><StatusBadge status={tool.status} /><span className="text-[10px] font-black text-slate-300 uppercase">{tool.category || 'General'}</span></div>{tool.status === ToolStatus.AVAILABLE && <button onClick={() => setAction('BOOKING')} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest active:scale-95 transition-all">Assign to Site</button>}{tool.status === ToolStatus.BOOKED_OUT && tool.currentHolderId === currentUser.id && <button onClick={() => setAction('RETURNING')} className="w-full py-5 bg-green-600 text-white rounded-2xl font-black uppercase tracking-widest active:scale-95 transition-all">Confirm Return</button>}</div>)}
+        {action === 'BOOKING' && (<div className="space-y-4 animate-in slide-in-from-right-4"><div className="space-y-1"><label className="text-[9px] font-black text-neda-navy/40 uppercase tracking-widest ml-1">Site Location</label><input type="text" placeholder="e.g. Waterfront Project" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm outline-none" value={site} onChange={e => setSite(e.target.value)} /></div><button onClick={handleBooking} disabled={!site || loading} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest disabled:opacity-50 active:scale-95 transition-all flex items-center justify-center gap-2">{loading && <Loader2 className="animate-spin" size={18} />} Assign Deployment</button></div>)}
+        {action === 'RETURNING' && (<div className="space-y-4 animate-in slide-in-from-right-4"><p className="text-xs font-bold text-neda-navy/60 text-center px-4">Confirming the return of this asset to the Neda Builda Warehouse.</p><button onClick={handleReturn} disabled={loading} className="w-full py-5 bg-green-600 text-white rounded-2xl font-black uppercase tracking-widest active:scale-95 transition-all flex items-center justify-center gap-2">{loading && <Loader2 className="animate-spin" size={18} />} Process Return</button></div>)}
       </div>
     </div>
   );
@@ -903,19 +647,7 @@ const AddToolModal: React.FC<{ onClose: () => void; onAdd: (t: Tool) => Promise<
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    try {
-      await onAdd({ 
-        id: 'T' + Math.random().toString(36).substr(2, 5).toUpperCase(), 
-        name, 
-        category, 
-        serialNumber: serial || undefined, 
-        status: ToolStatus.AVAILABLE, 
-        logs: [{ id: 'L' + Date.now(), userId: currentUser.id, userName: currentUser.name, action: 'CREATE', timestamp: Date.now() }] 
-      });
-    } catch (e) {
-    } finally {
-      setLoading(false);
-    }
+    try { await onAdd({ id: 'T' + Math.random().toString(36).substr(2, 5).toUpperCase(), name, category, serialNumber: serial || undefined, status: ToolStatus.AVAILABLE, logs: [{ id: 'L' + Date.now(), userId: currentUser.id, userName: currentUser.name, action: 'CREATE', timestamp: Date.now() }] }); } catch (e) {} finally { setLoading(false); }
   };
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-neda-navy/60 backdrop-blur-sm p-4 animate-in fade-in">
@@ -924,16 +656,9 @@ const AddToolModal: React.FC<{ onClose: () => void; onAdd: (t: Tool) => Promise<
         <div className="space-y-4">
           <input type="text" placeholder="Asset Name" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold outline-none" value={name} onChange={e => setName(e.target.value)} required />
           <input type="text" placeholder="Serial Number (Optional)" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold outline-none" value={serial} onChange={e => setSerial(e.target.value)} />
-          <select className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-xs font-black uppercase" value={category} onChange={e => setCategory(e.target.value)}>
-             <option>Power Tools</option>
-             <option>Heavy Machinery</option>
-             <option>Precision Gear</option>
-             <option>Safety Kit</option>
-          </select>
+          <select className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-xs font-black uppercase" value={category} onChange={e => setCategory(e.target.value)}><option>Power Tools</option><option>Heavy Machinery</option><option>Precision Gear</option><option>Safety Kit</option></select>
         </div>
-        <button type="submit" disabled={loading} className="w-full py-5 bg-neda-orange text-white rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2">
-           {loading ? <Loader2 className="animate-spin" size={18} /> : "Add to System"}
-        </button>
+        <button type="submit" disabled={loading} className="w-full py-5 bg-neda-orange text-white rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2">{loading ? <Loader2 className="animate-spin" size={18} /> : "Add to System"}</button>
         <button onClick={onClose} type="button" className="w-full text-slate-400 font-bold uppercase text-[10px]">Cancel</button>
       </form>
     </div>
@@ -954,26 +679,12 @@ const AIAssistant: React.FC<{ tools: Tool[] }> = ({ tools }) => {
   };
   return (
     <div className="flex flex-col h-[70vh] bg-slate-50 rounded-[2.5rem] overflow-hidden border border-slate-100 shadow-inner">
-       <div className="bg-neda-navy p-4 flex items-center gap-3 text-white">
-          <Sparkles className="text-neda-orange" size={20} />
-          <span className="font-black text-xs uppercase">Pulse Assistant</span>
-       </div>
+       <div className="bg-neda-navy p-4 flex items-center gap-3 text-white"><Sparkles className="text-neda-orange" size={20} /><span className="font-black text-xs uppercase">Pulse Assistant</span></div>
        <div className="flex-1 overflow-y-auto p-4 space-y-4 hide-scrollbar">
-          {messages.map((m, i) => (
-            <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`text-[11px] font-bold p-4 rounded-2xl max-w-[85%] ${
-                m.role === 'user' ? 'bg-neda-orange text-white rounded-tr-none' : 'bg-white text-neda-navy border border-slate-100 rounded-tl-none'
-              }`}>
-                {m.content}
-              </div>
-            </div>
-          ))}
+          {messages.map((m, i) => (<div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}><div className={`text-[11px] font-bold p-4 rounded-2xl max-w-[85%] ${m.role === 'user' ? 'bg-neda-orange text-white rounded-tr-none' : 'bg-white text-neda-navy border border-slate-100 rounded-tl-none'}`}>{m.content}</div></div>))}
           {loading && <div className="flex justify-start px-2"><Loader2 className="animate-spin text-neda-navy opacity-20" size={16} /></div>}
        </div>
-       <div className="p-4 bg-white border-t border-slate-100 flex gap-2">
-          <input type="text" placeholder="Ask Pulse..." className="flex-1 p-4 bg-slate-50 rounded-2xl text-xs font-bold outline-none" value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSend()} />
-          <button onClick={handleSend} className="p-4 bg-neda-navy text-white rounded-2xl"><Send size={18} /></button>
-       </div>
+       <div className="p-4 bg-white border-t border-slate-100 flex gap-2"><input type="text" placeholder="Ask Pulse..." className="flex-1 p-4 bg-slate-50 rounded-2xl text-xs font-bold outline-none" value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSend()} /><button onClick={handleSend} className="p-4 bg-neda-navy text-white rounded-2xl"><Send size={18} /></button></div>
     </div>
   );
 };

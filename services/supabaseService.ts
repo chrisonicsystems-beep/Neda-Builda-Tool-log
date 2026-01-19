@@ -13,7 +13,14 @@ if (!supabase) {
   console.warn("Supabase Client: Missing Credentials. Please check environment variables.");
 }
 
-const mapUserToDb = (user: User) => ({
+// Utility to remove undefined/null keys so Supabase doesn't try to map them to missing columns
+const cleanPayload = (obj: any) => {
+  return Object.fromEntries(
+    Object.entries(obj).filter(([_, v]) => v !== undefined && v !== null)
+  );
+};
+
+const mapUserToDb = (user: User) => cleanPayload({
   id: user.id,
   name: user.name,
   role: user.role,
@@ -32,11 +39,11 @@ const mapDbToUser = (dbUser: any): User => ({
 });
 
 const mapToolToDb = (tool: Tool) => {
-  // Defensive mapping: Only include columns we are sure exist in the 'tools' table.
-  // Based on user feedback, 'serial_number' and 'name' are causing PostgREST schema cache errors.
-  return {
+  // We strictly avoid including 'serial_number' or any other non-essential keys
+  // that have caused "schema cache" errors in the user's database.
+  return cleanPayload({
     id: tool.id,
-    tool_name: tool.name, // Mapping 'name' to 'tool_name' as suggested by previous errors
+    tool_name: tool.name, 
     status: tool.status,
     current_holder_id: tool.currentHolderId,
     current_holder_name: tool.currentHolderName,
@@ -45,8 +52,7 @@ const mapToolToDb = (tool: Tool) => {
     last_returned_at: tool.lastReturnedAt,
     main_photo: tool.mainPhoto,
     logs: tool.logs || []
-    // Note: 'serial_number' and 'category' are omitted as they are not in the schema cache.
-  };
+  });
 };
 
 const mapDbToTool = (dbTool: any): Tool => ({
