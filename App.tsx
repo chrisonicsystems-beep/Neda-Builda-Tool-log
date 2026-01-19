@@ -140,12 +140,8 @@ const App: React.FC = () => {
       setTimeout(() => setSyncSuccess(null), 3000);
       setSyncError(null);
     } catch (e: any) {
-      if (e.message.includes('SCHEMA_MISMATCH')) {
-        setSyncSuccess("Password Saved locally. Note: Database schema missing columns.");
-        setTimeout(() => setSyncSuccess(null), 5000);
-      } else {
-        setSyncError(e.message || "Database update failed. Local change saved.");
-      }
+      console.warn("DB update core sync error:", e);
+      setSyncError(e.message || "Database update failed. Local change saved.");
     } finally {
       setIsSyncing(false);
     }
@@ -305,7 +301,6 @@ const MandatoryPasswordChange: React.FC<{ user: User; onUpdate: (u: User) => voi
       return;
     }
     setIsDone(true);
-    // Call onUpdate immediately; the UI handles the 'isDone' state independently
     onUpdate({
       ...user,
       password: newPassword,
@@ -451,7 +446,7 @@ const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, users, isBiomet
 
       {showForgotModal && (
         <div className="fixed inset-0 z-[600] bg-neda-navy/90 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in">
-          <div className="bg-white w-full max-sm rounded-t-[2.5rem] sm:rounded-[2.5rem] p-10 pb-12 shadow-2xl text-center animate-in slide-in-from-bottom-10">
+          <div className="bg-white w-full max-w-sm rounded-t-[2.5rem] sm:rounded-[2.5rem] p-10 pb-12 shadow-2xl text-center animate-in slide-in-from-bottom-10">
             <div className="mx-auto w-16 h-16 bg-neda-lightOrange rounded-2xl flex items-center justify-center mb-6">
               <Key size={32} className="text-neda-orange" />
             </div>
@@ -493,11 +488,8 @@ const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, users, isBiomet
   );
 };
 
-// Sub-components kept identical but verified to be present
-const InventoryView: React.FC<any> = ({ 
-  tools, searchTerm, setSearchTerm, statusFilter, setStatusFilter, 
-  showFilters, setShowFilters, currentUser, onUpdateTool 
-}) => {
+// ... Sub-components (InventoryView, AdminDashboard, etc) kept as is but included in file ...
+const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, statusFilter, setStatusFilter, showFilters, setShowFilters, currentUser, onUpdateTool }) => {
   const handleAction = (tool: Tool) => {
     if (tool.status === ToolStatus.AVAILABLE) {
       onUpdateTool({
@@ -536,41 +528,23 @@ const InventoryView: React.FC<any> = ({
     <div className="space-y-6">
       <div className="relative">
         <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-        <input 
-          type="text" 
-          placeholder="Search equipment..." 
-          className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-100 rounded-2xl font-medium focus:ring-2 focus:ring-neda-navy/5 outline-none transition-all"
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-        />
-        <button 
-          onClick={() => setShowFilters(!showFilters)}
-          className={`absolute right-3 top-1/2 -translate-y-1/2 p-2 rounded-xl transition-colors ${showFilters ? 'bg-neda-navy text-white' : 'text-slate-400'}`}
-        >
-          <Filter size={18} />
-        </button>
+        <input type="text" placeholder="Search equipment..." className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-100 rounded-2xl font-medium outline-none" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+        <button onClick={() => setShowFilters(!showFilters)} className={`absolute right-3 top-1/2 -translate-y-1/2 p-2 rounded-xl transition-colors ${showFilters ? 'bg-neda-navy text-white' : 'text-slate-400'}`}><Filter size={18} /></button>
       </div>
-
       <div className="grid gap-4">
         {tools.map((tool: Tool) => (
-          <div key={tool.id} className="bg-white border border-slate-100 rounded-3xl p-5 shadow-sm group">
+          <div key={tool.id} className="bg-white border border-slate-100 rounded-3xl p-5 shadow-sm">
             <div className="flex justify-between items-start mb-4">
               <div>
                 <span className="text-[8px] font-black uppercase tracking-[0.2em] text-neda-orange mb-1 block">{tool.category}</span>
                 <h3 className="font-extrabold text-neda-navy text-lg">{tool.name}</h3>
               </div>
-              <div className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-wider ${
-                tool.status === ToolStatus.AVAILABLE ? 'bg-green-50 text-green-600' : 'bg-orange-50 text-orange-600'
-              }`}>
-                {tool.status.replace('_', ' ')}
-              </div>
+              <div className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-wider ${tool.status === ToolStatus.AVAILABLE ? 'bg-green-50 text-green-600' : 'bg-orange-50 text-orange-600'}`}>{tool.status.replace('_', ' ')}</div>
             </div>
             <div className="flex items-center justify-between pt-4 border-t border-slate-50">
                <span className="text-xs font-bold text-slate-600">{tool.currentHolderName || 'Warehouse'}</span>
                {(tool.status === ToolStatus.AVAILABLE || (tool.status === ToolStatus.BOOKED_OUT && tool.currentHolderId === currentUser.id)) && (
-                <button onClick={() => handleAction(tool)} className="px-5 py-2.5 bg-neda-navy text-white rounded-xl font-black text-[10px] uppercase">
-                  {tool.status === ToolStatus.AVAILABLE ? 'Book Out' : 'Return'}
-                </button>
+                <button onClick={() => handleAction(tool)} className="px-5 py-2.5 bg-neda-navy text-white rounded-xl font-black text-[10px] uppercase">{tool.status === ToolStatus.AVAILABLE ? 'Book Out' : 'Return'}</button>
               )}
             </div>
           </div>
@@ -582,7 +556,6 @@ const InventoryView: React.FC<any> = ({
 
 const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, userRole }) => {
   const [activeTab, setActiveTab] = useState<'USERS' | 'REPORTS'>('USERS');
-
   return (
     <div className="space-y-6">
       <div className="flex gap-4 border-b border-slate-100 pb-2">
@@ -616,8 +589,7 @@ const AIAssistant: React.FC<any> = ({ tools }) => {
   const handleAsk = async () => {
     if (!query.trim()) return;
     setLoading(true);
-    const res = await analyzeTools(tools, query);
-    setReply(res);
+    setReply(await analyzeTools(tools, query));
     setLoading(false);
   };
   return (

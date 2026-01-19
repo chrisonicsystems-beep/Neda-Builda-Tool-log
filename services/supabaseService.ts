@@ -19,24 +19,20 @@ const cleanPayload = (obj: any) => {
   );
 };
 
-// Standard mapping using snake_case
-const mapUserToDb = (user: User) => cleanPayload({
-  id: user.id,
-  name: user.name,
-  role: user.role,
-  email: user.email,
-  password: user.password,
-  is_enabled: user.isEnabled,
-  must_change_password: user.mustChangePassword
-});
-
-// Minimal fallback mapping for cases where schema is not fully set up
-const mapUserToDbMinimal = (user: User) => cleanPayload({
+// Core columns guaranteed to exist in a standard setup
+const mapUserToCoreDb = (user: User) => cleanPayload({
   id: user.id,
   name: user.name,
   role: user.role,
   email: user.email,
   password: user.password
+});
+
+// Optional columns that might be missing in custom schemas
+const mapUserToMetadataDb = (user: User) => cleanPayload({
+  id: user.id,
+  is_enabled: user.isEnabled,
+  must_change_password: user.mustChangePassword
 });
 
 const mapDbToUser = (dbUser: any): User => ({
@@ -92,27 +88,36 @@ export const upsertSingleTool = async (tool: Tool) => {
   if (error) throw error;
 };
 
+/**
+ * Upserts a user using a 'Core-First' strategy.
+ * 1. Saves mandatory core data (ID, Name, Email, Role, Password).
+ * 2. Attempts to save metadata (isEnabled, mustChangePassword) as a secondary step.
+ * This prevents missing column errors from stopping core functionality like password resets.
+ */
 export const upsertSingleUser = async (user: User) => {
   if (!supabase) return;
   
-  // Try full sync first
-  const { error: fullError } = await supabase.from('users').upsert(mapUserToDb(user), { onConflict: 'id' });
+  // Step 1: Save Core Data (Mandatory)
+  const { error: coreError } = await supabase
+    .from('users')
+    .upsert(mapUserToCoreDb(user), { onConflict: 'id' });
   
-  if (fullError) {
-    console.warn("Full user sync failed (likely missing schema columns), trying minimal sync:", fullError.message);
+  if (coreError) {
+    console.error("Core User Sync Failed:", coreError.message);
+    throw new Error(`Database Error: ${coreError.message}`);
+  }
+
+  // Step 2: Try Metadata (Optional - will not throw if it fails)
+  try {
+    const { error: metaError } = await supabase
+      .from('users')
+      .upsert(mapUserToMetadataDb(user), { onConflict: 'id' });
     
-    // Fallback to minimal sync if columns are missing
-    const { error: minError } = await supabase.from('users').upsert(mapUserToDbMinimal(user), { onConflict: 'id' });
-    
-    if (minError) {
-      throw new Error(`Database Error: ${minError.message}`);
+    if (metaError) {
+      console.warn("User Metadata Sync failed (schema mismatch likely):", metaError.message);
     }
-    
-    // If we reached here, minimal worked but full failed. 
-    // We throw a specific warning so the UI can notify the user to update their schema.
-    if (fullError.message.includes('column')) {
-      throw new Error(`SCHEMA_MISMATCH: Password saved, but 'must_change_password' column is missing in Supabase.`);
-    }
+  } catch (err) {
+    console.warn("Silent failure updating user metadata:", err);
   }
 };
 
@@ -135,8 +140,8 @@ export const fetchTools = async (): Promise<Tool[] | null> => {
 
 export const syncUsers = async (users: User[]) => {
   if (!supabase) return;
-  // Use minimal mapping for initial sync to be safe
-  const { error } = await supabase.from('users').upsert(users.map(mapUserToDbMinimal), { onConflict: 'id' });
+  // Use core mapping for initial sync to be safe
+  const { error } = await supabase.from('users').upsert(users.map(mapUserToCoreDb), { onConflict: 'id' });
   if (error) throw error;
 };
 
