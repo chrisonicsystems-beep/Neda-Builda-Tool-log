@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Tool, ToolStatus, User, UserRole, View, ToolLog } from './types';
 import { INITIAL_USERS, INITIAL_TOOLS } from './mockData';
@@ -28,7 +29,7 @@ import {
   Send,
   AlertCircle
 } from 'lucide-react';
-import { analyzeTools } from './services/geminiService';
+import { analyzeTools, searchAddresses } from './services/geminiService';
 import { fetchTools, fetchUsers, syncTools, syncUsers, upsertSingleTool, upsertSingleUser, supabase } from './services/supabaseService';
 
 const App: React.FC = () => {
@@ -334,7 +335,7 @@ const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, status
       </div>
 
       {selectedTool && (
-        <ToolModal tool={selectedTool} onClose={() => setSelectedTool(null)} currentUser={currentUser} onUpdateTool={onUpdateTool} />
+        <ToolModal tool={selectedTool} onClose={() => setSelectedTool(null)} currentUser={currentUser} onUpdate={onUpdateTool} />
       )}
     </div>
   );
@@ -445,6 +446,30 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onAddUser, onBulkImpor
 
 const ToolModal: React.FC<any> = ({ tool, onClose, currentUser, onUpdate }) => {
   const [site, setSite] = useState(tool.currentSite || '');
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
+
+  // Address autofill logic with debounce
+  useEffect(() => {
+    const delayDebounceFn = setTimeout(async () => {
+      if (site.trim().length >= 3) {
+        setIsLoadingSuggestions(true);
+        try {
+          const results = await searchAddresses(site);
+          setSuggestions(results);
+        } catch (error) {
+          console.error("Address fetch error:", error);
+        } finally {
+          setIsLoadingSuggestions(false);
+        }
+      } else {
+        setSuggestions([]);
+      }
+    }, 450);
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [site]);
+
   const handleAssign = async () => {
     await onUpdate({ 
       ...tool, 
@@ -459,19 +484,61 @@ const ToolModal: React.FC<any> = ({ tool, onClose, currentUser, onUpdate }) => {
 
   return (
     <div className="fixed inset-0 z-[150] bg-neda-navy/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in">
-      <div className="bg-white w-full max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 shadow-2xl animate-in slide-in-from-bottom-10">
+      <div className="bg-white w-full max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 shadow-2xl animate-in slide-in-from-bottom-10 overflow-visible">
         <div className="flex justify-between items-start mb-6">
           <h2 className="text-xl font-black text-neda-navy uppercase">{tool.name}</h2>
-          <button onClick={onClose} className="p-2 bg-slate-50 rounded-xl"><X size={20} /></button>
+          <button onClick={onClose} className="p-2 bg-slate-50 rounded-xl transition-colors hover:bg-slate-100"><X size={20} /></button>
         </div>
-        <div className="space-y-4">
-          <input 
-            placeholder="Assign to Site..." 
-            className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold outline-none"
-            value={site}
-            onChange={(e) => setSite(e.target.value)}
-          />
-          <button onClick={handleAssign} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg">Confirm Deployment</button>
+        
+        <div className="space-y-4 relative">
+          <div className="relative">
+            <div className="flex items-center bg-slate-50 border border-slate-100 rounded-2xl px-4 focus-within:ring-2 focus-within:ring-neda-navy/10 transition-all">
+              <MapPin size={18} className="text-slate-300" />
+              <input 
+                placeholder="Assign to Site Address..." 
+                className="flex-1 p-4 bg-transparent font-bold outline-none text-sm"
+                value={site}
+                onChange={(e) => setSite(e.target.value)}
+              />
+              {isLoadingSuggestions && <Loader2 size={16} className="animate-spin text-neda-orange" />}
+            </div>
+
+            {/* Suggestions Dropdown */}
+            {suggestions.length > 0 && (
+              <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-slate-100 rounded-2xl shadow-2xl z-[160] overflow-hidden animate-in slide-in-from-top-2">
+                {suggestions.map((addr, idx) => (
+                  <button 
+                    key={idx}
+                    onClick={() => {
+                      setSite(addr);
+                      setSuggestions([]);
+                    }}
+                    className="w-full text-left px-5 py-4 hover:bg-slate-50 text-[10px] font-black uppercase tracking-wider text-neda-navy border-b border-slate-50 last:border-0 transition-colors"
+                  >
+                    {addr}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+             <div className="flex items-center gap-3">
+                <UserIcon size={16} className="text-neda-orange" />
+                <div>
+                  <p className="text-[8px] font-black text-slate-300 uppercase tracking-widest">Logging to Holder</p>
+                  <p className="text-xs font-black text-neda-navy uppercase">{currentUser.name}</p>
+                </div>
+             </div>
+          </div>
+
+          <button 
+            onClick={handleAssign} 
+            disabled={!site.trim()}
+            className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-[0.98] transition-all disabled:opacity-30"
+          >
+            Confirm Deployment
+          </button>
         </div>
       </div>
     </div>
