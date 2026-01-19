@@ -44,6 +44,7 @@ export interface Tool {
   bookedAt?: number;
   lastReturnedAt?: number;
   mainPhoto?: string; // Original photo of the asset
+  notes?: string;
   logs: ToolLog[];
 }
 

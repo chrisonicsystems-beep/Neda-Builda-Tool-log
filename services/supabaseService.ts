@@ -40,19 +40,16 @@ const mapDbToUser = (dbUser: any): User => ({
 
 const mapToolToDb = (tool: Tool) => {
   // Mapping local Tool object to the actual Supabase table columns.
-  // Based on the CSV structure provided, the column names are likely:
-  // equipment_tool (for name), equipment_type (for category)
   return cleanPayload({
     id: tool.id,
-    equipment_tool: tool.name, // Corrected from tool_name/name
-    equipment_type: tool.category, // Added based on CSV headers
+    equipment_tool: tool.name,
+    equipment_type: tool.category,
     status: tool.status,
     current_holder_id: tool.currentHolderId,
     current_holder_name: tool.currentHolderName,
     current_site: tool.currentSite,
     main_photo: tool.mainPhoto,
-    // We omit booked_at, last_returned_at, and logs if they aren't in the schema cache
-    // The previous errors suggest the DB schema is very strict to the CSV import.
+    notes: tool.notes || '', // Satisfy NOT NULL constraint
   });
 };
 
@@ -68,6 +65,7 @@ const mapDbToTool = (dbTool: any): Tool => ({
   bookedAt: dbTool.booked_at,
   lastReturnedAt: dbTool.last_returned_at,
   mainPhoto: dbTool.main_photo,
+  notes: dbTool.notes || '',
   logs: dbTool.logs || []
 });
 
@@ -119,7 +117,7 @@ export const syncUsers = async (users: User[]) => {
 
 export const fetchUsers = async (): Promise<User[] | null> => {
   if (!supabase) return null;
-  const { data, error } = await supabase.from('users').select('*');
+  const { data, error } = await supabase.from('tools').select('*');
   if (error) {
     console.error('Error fetching users:', error);
     return null;
