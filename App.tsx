@@ -579,7 +579,6 @@ const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, users, isBiomet
   );
 };
 
-// ... Remaining Sub-components (InventoryView, AdminDashboard, etc) unchanged but kept for completeness ...
 const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, statusFilter, setStatusFilter, showFilters, setShowFilters, currentUser, onUpdateTool }) => {
   const handleAction = (tool: Tool) => {
     if (tool.status === ToolStatus.AVAILABLE) {
@@ -649,13 +648,38 @@ const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, status
 };
 
 const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, userRole }) => {
-  const [activeTab, setActiveTab] = useState<'USERS' | 'REPORTS'>('USERS');
+  const [activeTab, setActiveTab] = useState<'USERS' | 'STOCKTAKE' | 'REPORTS'>('USERS');
+
+  const handleDownloadCSV = () => {
+    const headers = ["Tool Name", "Category", "Serial Number", "Status", "Current Holder", "Current Site"];
+    const rows = tools.map((t: Tool) => [
+      `"${t.name.replace(/"/g, '""')}"`,
+      `"${t.category.replace(/"/g, '""')}"`,
+      `"${(t.serialNumber || 'N/A').replace(/"/g, '""')}"`,
+      t.status,
+      `"${(t.currentHolderName || 'Warehouse').replace(/"/g, '""')}"`,
+      `"${(t.currentSite || 'Warehouse').replace(/"/g, '""')}"`
+    ]);
+    
+    const csvContent = [headers.join(","), ...rows.map((e: string[]) => e.join(","))].join("\n");
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `Neda_Inventory_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className="space-y-6">
-      <div className="flex gap-6 border-b border-slate-100 pb-2">
-        <button onClick={() => setActiveTab('USERS')} className={`pb-2 text-[10px] font-black uppercase tracking-widest ${activeTab === 'USERS' ? 'text-neda-orange border-b-2 border-neda-orange' : 'text-slate-400'}`}>Staff List</button>
-        <button onClick={() => setActiveTab('REPORTS')} className={`pb-2 text-[10px] font-black uppercase tracking-widest ${activeTab === 'REPORTS' ? 'text-neda-orange border-b-2 border-neda-orange' : 'text-slate-400'}`}>Analytics</button>
+      <div className="flex gap-4 border-b border-slate-100 pb-2 overflow-x-auto hide-scrollbar whitespace-nowrap">
+        <button onClick={() => setActiveTab('USERS')} className={`pb-2 text-[10px] font-black uppercase tracking-widest flex-shrink-0 ${activeTab === 'USERS' ? 'text-neda-orange border-b-2 border-neda-orange' : 'text-slate-400'}`}>Staff List</button>
+        <button onClick={() => setActiveTab('STOCKTAKE')} className={`pb-2 text-[10px] font-black uppercase tracking-widest flex-shrink-0 ${activeTab === 'STOCKTAKE' ? 'text-neda-orange border-b-2 border-neda-orange' : 'text-slate-400'}`}>Stocktake</button>
+        <button onClick={() => setActiveTab('REPORTS')} className={`pb-2 text-[10px] font-black uppercase tracking-widest flex-shrink-0 ${activeTab === 'REPORTS' ? 'text-neda-orange border-b-2 border-neda-orange' : 'text-slate-400'}`}>Analytics</button>
       </div>
+
       {activeTab === 'USERS' && (
         <div className="grid gap-3">
           {allUsers.map((user: User) => (
@@ -670,6 +694,57 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, userRole
               {user.mustChangePassword && <span className="bg-orange-50 text-neda-orange px-3 py-1.5 rounded-lg text-[8px] font-black uppercase tracking-wider border border-neda-orange/10">Key Pending</span>}
             </div>
           ))}
+        </div>
+      )}
+
+      {activeTab === 'STOCKTAKE' && (
+        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2">
+          <div className="bg-neda-navy p-8 rounded-[2.5rem] text-white shadow-xl relative overflow-hidden">
+             <div className="relative z-10">
+               <h3 className="text-xl font-black uppercase tracking-tight mb-2">Inventory Export</h3>
+               <p className="text-[10px] font-bold text-slate-400 uppercase leading-relaxed mb-6 max-w-[200px]">
+                 Generate a detailed CSV report of all company assets, holders, and locations.
+               </p>
+               <button 
+                 onClick={handleDownloadCSV}
+                 className="flex items-center gap-3 px-6 py-4 bg-neda-orange text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg active:scale-95 transition-all"
+               >
+                 <Download size={18} />
+                 Download CSV
+               </button>
+             </div>
+             <div className="absolute top-1/2 -right-4 -translate-y-1/2 opacity-10">
+                <FileSpreadsheet size={160} />
+             </div>
+          </div>
+
+          <div className="bg-white rounded-[2rem] border border-slate-100 overflow-hidden shadow-sm">
+            <div className="px-6 py-4 bg-slate-50 border-b border-slate-100">
+              <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Inventory Status Summary</h4>
+            </div>
+            <div className="divide-y divide-slate-50">
+              {tools.map((t: Tool) => (
+                <div key={t.id} className="px-6 py-4 flex items-center justify-between">
+                  <div>
+                    <p className="font-black text-neda-navy text-xs uppercase tracking-tight">{t.name}</p>
+                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{t.currentSite || 'Warehouse'}</p>
+                  </div>
+                  <div className={`text-[8px] font-black uppercase px-2 py-1 rounded-md ${t.status === 'AVAILABLE' ? 'text-green-600 bg-green-50' : 'text-orange-600 bg-orange-50'}`}>
+                    {t.status.replace('_', ' ')}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'REPORTS' && (
+        <div className="p-8 text-center bg-white rounded-[2.5rem] border border-slate-100">
+          <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
+             <ArrowUpRight className="text-slate-300" size={32} />
+          </div>
+          <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Enhanced Analytics Coming Soon</p>
         </div>
       )}
     </div>
