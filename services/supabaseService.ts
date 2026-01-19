@@ -13,6 +13,9 @@ if (!supabase) {
   console.warn("Supabase Client: Missing Credentials. Please check environment variables.");
 }
 
+/**
+ * For Users, we still clean payload because the schema is more standard.
+ */
 const cleanPayload = (obj: any) => {
   return Object.fromEntries(
     Object.entries(obj).filter(([_, v]) => v !== undefined && v !== null)
@@ -37,22 +40,26 @@ const mapDbToUser = (dbUser: any): User => ({
   isEnabled: dbUser.is_enabled
 });
 
+/**
+ * CRITICAL: For Tools, we DO NOT use cleanPayload.
+ * We must explicitly send every column to avoid "NULL VALUE" errors 
+ * when an upsert omits a NOT NULL column that doesn't have a default value in DB.
+ */
 const mapToolToDb = (tool: Tool) => {
-  // We explicitly include all columns that might have NOT NULL constraints
-  // and provide fallbacks to empty strings or defaults.
-  return cleanPayload({
+  return {
     id: tool.id,
-    equipment_tool: tool.name || 'Unnamed Asset',
+    equipment_tool: tool.name || '',
     equipment_type: tool.category || 'General',
     status: tool.status || ToolStatus.AVAILABLE,
-    current_holder_id: tool.currentHolderId,
-    current_holder_name: tool.currentHolderName,
-    current_site: tool.currentSite,
-    main_photo: tool.mainPhoto,
-    notes: tool.notes || '', // FIX: Explicitly send empty string if notes is missing
-    date_of_purchase: tool.dateOfPurchase,
-    number_of_items: tool.numberOfItems || 1
-  });
+    current_holder_id: tool.currentHolderId || null,
+    current_holder_name: tool.currentHolderName || null,
+    current_site: tool.currentSite || null,
+    main_photo: tool.mainPhoto || null,
+    notes: tool.notes || '', // Ensure this is NEVER null or undefined
+    date_of_purchase: tool.dateOfPurchase || null,
+    number_of_items: tool.numberOfItems || 1,
+    serial_number: tool.serialNumber || ''
+  };
 };
 
 const mapDbToTool = (dbTool: any): Tool => ({
@@ -121,6 +128,7 @@ export const syncUsers = async (users: User[]) => {
 
 export const fetchUsers = async (): Promise<User[] | null> => {
   if (!supabase) return null;
+  // Fixed: Querying 'users' table instead of 'tools'
   const { data, error } = await supabase.from('users').select('*');
   if (error) {
     console.error('Error fetching users:', error);
