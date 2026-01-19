@@ -791,7 +791,9 @@ const ToolModal: React.FC<any> = ({ tool, onClose, currentUser, onUpdate }) => {
   const isManagement = currentUser.role === UserRole.ADMIN || currentUser.role === UserRole.MANAGER;
   const isAvailable = tool.status === ToolStatus.AVAILABLE;
   const isHeldByMe = tool.currentHolderId === currentUser.id || (tool.currentHolderName && tool.currentHolderName.toLowerCase() === currentUser.name.toLowerCase());
-  const canBook = isAvailable || (isManagement && !isHeldByMe);
+  
+  // Logic: Management can always reassign. Site Staff can ONLY book out from 'AVAILABLE'.
+  const canBook = isManagement ? true : isAvailable;
 
   useEffect(() => {
     const delayDebounceFn = setTimeout(async () => {
@@ -915,9 +917,14 @@ const ToolModal: React.FC<any> = ({ tool, onClose, currentUser, onUpdate }) => {
                   Return to Warehouse
                 </button>
               ) : (
-                <div className="p-4 bg-slate-50 rounded-2xl flex items-center justify-center gap-3 border border-slate-100 text-center">
-                  <Lock size={16} className="text-slate-300" />
-                  <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Read-Only Asset</span>
+                <div className="p-6 bg-slate-50 rounded-2xl flex flex-col items-center justify-center gap-2 border border-slate-100 text-center">
+                  <div className="p-3 bg-white rounded-full border border-slate-100 mb-1">
+                    <Lock size={20} className="text-neda-orange" />
+                  </div>
+                  <span className="text-[10px] font-black uppercase text-neda-navy tracking-widest">Locked Asset</span>
+                  <p className="text-[8px] font-bold text-slate-400 uppercase leading-relaxed max-w-[180px]">
+                    This item is assigned to another person. It must be returned to the warehouse before it can be redeployed.
+                  </p>
                 </div>
               )}
             </div>
