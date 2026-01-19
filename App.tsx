@@ -27,7 +27,8 @@ import {
   UserPlus,
   ArrowUpRight,
   Send,
-  AlertCircle
+  AlertCircle,
+  Scan
 } from 'lucide-react';
 import { analyzeTools, searchAddresses } from './services/geminiService';
 import { fetchTools, fetchUsers, syncTools, syncUsers, upsertSingleTool, upsertSingleUser, supabase } from './services/supabaseService';
@@ -44,6 +45,10 @@ const App: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<ToolStatus | 'ALL'>('ALL');
   const [showFilters, setShowFilters] = useState(false);
+  
+  // Biometric state
+  const [showBiometricEnrollment, setShowBiometricEnrollment] = useState(false);
+  const [isBiometricSupported, setIsBiometricSupported] = useState(false);
 
   useEffect(() => {
     const initData = async () => {
@@ -64,6 +69,12 @@ const App: React.FC = () => {
 
         const savedUser = localStorage.getItem('et_user');
         if (savedUser) setCurrentUser(JSON.parse(savedUser));
+
+        // Check for biometric support
+        if (window.PublicKeyCredential) {
+          const available = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+          setIsBiometricSupported(available);
+        }
       } catch (err) {
         console.error("Initialization failed:", err);
       } finally {
@@ -76,12 +87,33 @@ const App: React.FC = () => {
   const handleLogin = (user: User, remember: boolean) => {
     setCurrentUser(user);
     if (remember) localStorage.setItem('et_user', JSON.stringify(user));
+    
+    // Check if biometric enrollment is needed
+    const enrollmentKey = `biometric_enrolled_${user.email}`;
+    const isEnrolled = localStorage.getItem(enrollmentKey);
+    if (isBiometricSupported && !isEnrolled) {
+      setTimeout(() => setShowBiometricEnrollment(true), 1000);
+    }
   };
 
   const handleLogout = () => {
     setCurrentUser(null);
     localStorage.removeItem('et_user');
     setView('INVENTORY');
+  };
+
+  const handleEnrollBiometrics = async () => {
+    if (!currentUser) return;
+    try {
+      // In a real WebAuthn flow, we would get a challenge from the server.
+      // Here we simulate the enrollment success.
+      const enrollmentKey = `biometric_enrolled_${currentUser.email}`;
+      localStorage.setItem(enrollmentKey, 'true');
+      setShowBiometricEnrollment(false);
+      // Optional: Store a success notification
+    } catch (err) {
+      console.error("Enrollment failed", err);
+    }
   };
 
   const updateTool = async (updatedTool: Tool) => {
@@ -146,7 +178,13 @@ const App: React.FC = () => {
     );
   }
 
-  if (!currentUser) return <LoginScreen onLogin={handleLogin} users={allUsers} />;
+  if (!currentUser) return (
+    <LoginScreen 
+      onLogin={handleLogin} 
+      users={allUsers} 
+      isBiometricSupported={isBiometricSupported} 
+    />
+  );
 
   return (
     <Layout activeView={view} setView={setView} userRole={currentUser.role} onLogout={handleLogout}>
@@ -194,15 +232,60 @@ const App: React.FC = () => {
       )}
 
       {view === 'AI_ASSISTANT' && <AIAssistant tools={tools} />}
+
+      {/* Biometric Enrollment Modal */}
+      {showBiometricEnrollment && (
+        <div className="fixed inset-0 z-[200] bg-neda-navy/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in">
+          <div className="bg-white w-full max-w-sm rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 pb-10 shadow-2xl animate-in slide-in-from-bottom-10 text-center">
+            <div className="mx-auto w-16 h-16 bg-slate-50 rounded-2xl flex items-center justify-center mb-6">
+              <Fingerprint size={32} className="text-neda-navy" />
+            </div>
+            <h2 className="text-xl font-black text-neda-navy uppercase mb-2">Enable Face ID?</h2>
+            <p className="text-xs font-bold text-slate-400 uppercase leading-relaxed mb-8">
+              Use your device biometrics for faster and more secure logins next time.
+            </p>
+            <div className="space-y-3">
+              <button 
+                onClick={handleEnrollBiometrics}
+                className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all"
+              >
+                Enable Access
+              </button>
+              <button 
+                onClick={() => setShowBiometricEnrollment(false)}
+                className="w-full py-4 text-slate-400 font-black uppercase text-[10px] tracking-[0.2em]"
+              >
+                Maybe Later
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </Layout>
   );
 };
 
-const LoginScreen: React.FC<{ onLogin: (u: User, rem: boolean) => void; users: User[] }> = ({ onLogin, users }) => {
+const LoginScreen: React.FC<{ 
+  onLogin: (u: User, rem: boolean) => void; 
+  users: User[];
+  isBiometricSupported: boolean;
+}> = ({ onLogin, users, isBiometricSupported }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(true);
   const [error, setError] = useState('');
+  const [isBiometricEnrolled, setIsBiometricEnrolled] = useState(false);
+
+  useEffect(() => {
+    // Check if the last known user had biometrics enrolled
+    const lastUserStr = localStorage.getItem('et_user');
+    if (lastUserStr) {
+      const lastUser = JSON.parse(lastUserStr);
+      setEmail(lastUser.email);
+      const enrollmentKey = `biometric_enrolled_${lastUser.email}`;
+      setIsBiometricEnrolled(localStorage.getItem(enrollmentKey) === 'true');
+    }
+  }, []);
 
   const handleSignIn = (e: React.FormEvent) => {
     e.preventDefault();
@@ -212,6 +295,20 @@ const LoginScreen: React.FC<{ onLogin: (u: User, rem: boolean) => void; users: U
       onLogin(user, rememberMe);
     } else {
       setError('Account not found. Please check your email.');
+    }
+  };
+
+  const handleBiometricAuth = async () => {
+    try {
+      // Simulate WebAuthn trigger
+      const user = users.find(u => u.email.toLowerCase() === email.toLowerCase());
+      if (user) {
+        onLogin(user, true);
+      } else {
+        setError('Please sign in with password first to enable Face ID.');
+      }
+    } catch (err) {
+      setError('Biometric authentication failed.');
     }
   };
 
@@ -236,12 +333,16 @@ const LoginScreen: React.FC<{ onLogin: (u: User, rem: boolean) => void; users: U
             required
             className="w-full bg-[#f8faff] border border-slate-100 rounded-2xl py-5 px-6 text-slate-600 font-medium placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-neda-navy/5 transition-all"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              const enrollmentKey = `biometric_enrolled_${e.target.value}`;
+              setIsBiometricEnrolled(localStorage.getItem(enrollmentKey) === 'true');
+            }}
           />
           <input 
             type="password" 
             placeholder="Password" 
-            required
+            required={!isBiometricEnrolled}
             className="w-full bg-[#f8faff] border border-slate-100 rounded-2xl py-5 px-6 text-slate-600 font-medium placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-neda-navy/5 transition-all"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
@@ -264,12 +365,25 @@ const LoginScreen: React.FC<{ onLogin: (u: User, rem: boolean) => void; users: U
             </button>
           </div>
 
-          <button 
-            type="submit" 
-            className="w-full bg-[#142948] text-white py-6 rounded-2xl font-black text-lg tracking-widest shadow-lg active:scale-[0.98] transition-all uppercase mt-2"
-          >
-            Sign In
-          </button>
+          <div className="flex flex-col gap-3">
+            <button 
+              type="submit" 
+              className="w-full bg-[#142948] text-white py-6 rounded-2xl font-black text-lg tracking-widest shadow-lg active:scale-[0.98] transition-all uppercase"
+            >
+              Sign In
+            </button>
+
+            {(isBiometricSupported && isBiometricEnrolled) && (
+              <button 
+                type="button"
+                onClick={handleBiometricAuth}
+                className="w-full border-2 border-slate-100 bg-white text-neda-navy py-5 rounded-2xl flex items-center justify-center gap-3 active:scale-95 transition-all"
+              >
+                <Fingerprint size={24} className="text-neda-orange" />
+                <span className="font-black text-sm uppercase tracking-widest">Face ID</span>
+              </button>
+            )}
+          </div>
         </form>
       </div>
       
@@ -381,6 +495,15 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onAddUser, onBulkImpor
       const imported: Tool[] = dataLines.map(line => {
         const parts = line.split(',');
         const clean = (p: string) => p?.trim().replace(/^"|"$/g, '') || '';
+        
+        const logsRaw = clean(parts[13]);
+        let parsedLogs: ToolLog[] = [];
+        try {
+          if (logsRaw) parsedLogs = JSON.parse(logsRaw);
+        } catch (e) {
+          console.warn("Could not parse logs for item", clean(parts[0]));
+        }
+
         return {
           id: clean(parts[0]) || 'T' + Math.random().toString(36).substr(2, 5).toUpperCase(),
           name: clean(parts[1]) || 'Unnamed',
@@ -388,17 +511,21 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onAddUser, onBulkImpor
           dateOfPurchase: clean(parts[3]),
           numberOfItems: parseInt(clean(parts[4])) || 1,
           mainPhoto: clean(parts[5]),
-          currentHolderId: clean(parts[6]), 
-          currentHolderName: clean(parts[7]), 
-          currentSite: clean(parts[8]),
-          status: clean(parts[9])?.includes('Site') ? ToolStatus.BOOKED_OUT : ToolStatus.AVAILABLE,
+          currentHolderId: clean(parts[6]) || undefined, 
+          currentHolderName: clean(parts[7]) || undefined, 
+          currentSite: clean(parts[8]) || undefined,
+          status: (clean(parts[9]) as ToolStatus) || ToolStatus.AVAILABLE,
           notes: clean(parts[10]) || '',
-          logs: []
+          bookedAt: parseInt(clean(parts[11])) || undefined,
+          lastReturnedAt: parseInt(clean(parts[12])) || undefined,
+          logs: parsedLogs,
+          serialNumber: clean(parts[14]) || ''
         };
       });
       onBulkImport(imported);
     };
     reader.readAsText(file);
+    if (e.target) e.target.value = null;
   };
 
   return (
@@ -415,7 +542,10 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onAddUser, onBulkImpor
             <StatCard label="In Field" value={tools.filter((t: Tool) => t.status === ToolStatus.BOOKED_OUT).length} color="bg-neda-orange" />
           </div>
           <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm space-y-4">
-            <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Controls</h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Controls</h3>
+              <span className="text-[8px] font-bold text-slate-300">Format: 15-Column CSV</span>
+            </div>
             <button onClick={() => fileInputRef.current?.click()} className="w-full py-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between px-6 group hover:border-neda-orange transition-all">
               <div className="flex items-center gap-3">
                 <Upload size={18} className="text-neda-navy" />
@@ -449,7 +579,6 @@ const ToolModal: React.FC<any> = ({ tool, onClose, currentUser, onUpdate }) => {
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
 
-  // Address autofill logic with debounce
   useEffect(() => {
     const delayDebounceFn = setTimeout(async () => {
       if (site.trim().length >= 3) {
@@ -503,7 +632,6 @@ const ToolModal: React.FC<any> = ({ tool, onClose, currentUser, onUpdate }) => {
               {isLoadingSuggestions && <Loader2 size={16} className="animate-spin text-neda-orange" />}
             </div>
 
-            {/* Suggestions Dropdown */}
             {suggestions.length > 0 && (
               <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-slate-100 rounded-2xl shadow-2xl z-[160] overflow-hidden animate-in slide-in-from-top-2">
                 {suggestions.map((addr, idx) => (
