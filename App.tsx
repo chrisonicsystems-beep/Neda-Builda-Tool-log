@@ -33,7 +33,9 @@ import {
   FileSpreadsheet,
   History,
   ShieldAlert,
-  Save
+  Save,
+  Mail,
+  Info
 } from 'lucide-react';
 import { analyzeTools, searchAddresses } from './services/geminiService';
 import { fetchTools, fetchUsers, syncTools, syncUsers, upsertSingleTool, upsertSingleUser, supabase } from './services/supabaseService';
@@ -308,6 +310,7 @@ const LoginScreen: React.FC<{
   const [rememberMe, setRememberMe] = useState(true);
   const [error, setError] = useState('');
   const [isBiometricEnrolled, setIsBiometricEnrolled] = useState(false);
+  const [showForgotModal, setShowForgotModal] = useState(false);
 
   useEffect(() => {
     const lastUserStr = localStorage.getItem('et_user');
@@ -383,7 +386,11 @@ const LoginScreen: React.FC<{
               />
               <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest group-hover:text-slate-600 transition-colors">Remember Me</span>
             </label>
-            <button type="button" className="text-neda-orange text-[10px] font-black uppercase tracking-widest hover:opacity-80 transition-opacity">
+            <button 
+              type="button" 
+              onClick={() => setShowForgotModal(true)}
+              className="text-neda-orange text-[10px] font-black uppercase tracking-widest hover:opacity-80 transition-opacity"
+            >
               Forgot?
             </button>
           </div>
@@ -407,6 +414,35 @@ const LoginScreen: React.FC<{
           </div>
         </form>
       </div>
+
+      {/* Forgot Password Modal */}
+      {showForgotModal && (
+        <div className="fixed inset-0 z-[200] bg-neda-navy/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in">
+          <div className="bg-white w-full max-w-sm rounded-t-[2.5rem] sm:rounded-[2.5rem] p-10 pb-12 shadow-2xl animate-in slide-in-from-bottom-10 text-center">
+            <div className="mx-auto w-16 h-16 bg-neda-lightOrange rounded-2xl flex items-center justify-center mb-6">
+              <Mail size={32} className="text-neda-orange" />
+            </div>
+            <h2 className="text-xl font-black text-neda-navy uppercase mb-4">Reset Password</h2>
+            <p className="text-xs font-bold text-slate-500 uppercase leading-relaxed mb-8">
+              Please contact your system administrator to reset your login credentials.
+            </p>
+            
+            <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 mb-8 flex flex-col items-center">
+               <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Administrator Contact</span>
+               <p className="text-sm font-black text-neda-navy uppercase tracking-tight">Karin Admin</p>
+               <a href="mailto:karin@nedabuilda.com" className="text-[10px] font-bold text-neda-orange mt-1">karin@nedabuilda.com</a>
+            </div>
+
+            <button 
+              onClick={() => setShowForgotModal(false)}
+              className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all"
+            >
+              Got it, thanks
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="mt-8 opacity-30">
         <p className="text-[8px] font-black uppercase tracking-[0.4em] text-neda-navy">Powered by Chrisonic</p>
       </div>
