@@ -39,26 +39,27 @@ const mapDbToUser = (dbUser: any): User => ({
 });
 
 const mapToolToDb = (tool: Tool) => {
-  // We strictly avoid including 'serial_number' or any other non-essential keys
-  // that have caused "schema cache" errors in the user's database.
+  // Mapping local Tool object to the actual Supabase table columns.
+  // Based on the CSV structure provided, the column names are likely:
+  // equipment_tool (for name), equipment_type (for category)
   return cleanPayload({
     id: tool.id,
-    tool_name: tool.name, 
+    equipment_tool: tool.name, // Corrected from tool_name/name
+    equipment_type: tool.category, // Added based on CSV headers
     status: tool.status,
     current_holder_id: tool.currentHolderId,
     current_holder_name: tool.currentHolderName,
     current_site: tool.currentSite,
-    booked_at: tool.bookedAt,
-    last_returned_at: tool.lastReturnedAt,
     main_photo: tool.mainPhoto,
-    logs: tool.logs || []
+    // We omit booked_at, last_returned_at, and logs if they aren't in the schema cache
+    // The previous errors suggest the DB schema is very strict to the CSV import.
   });
 };
 
 const mapDbToTool = (dbTool: any): Tool => ({
   id: dbTool.id,
-  name: dbTool.tool_name || dbTool.name || 'Unnamed Asset',
-  category: dbTool.category || 'General',
+  name: dbTool.equipment_tool || dbTool.tool_name || dbTool.name || 'Unnamed Asset',
+  category: dbTool.equipment_type || dbTool.category || 'General',
   serialNumber: dbTool.serial_number || '', 
   status: (dbTool.status as ToolStatus) || ToolStatus.AVAILABLE,
   currentHolderId: dbTool.current_holder_id,
