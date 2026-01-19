@@ -30,7 +30,10 @@ import {
   AlertCircle,
   Scan,
   CheckCircle,
-  FileSpreadsheet
+  FileSpreadsheet,
+  History,
+  ShieldAlert,
+  Save
 } from 'lucide-react';
 import { analyzeTools, searchAddresses } from './services/geminiService';
 import { fetchTools, fetchUsers, syncTools, syncUsers, upsertSingleTool, upsertSingleUser, supabase } from './services/supabaseService';
@@ -70,10 +73,19 @@ const App: React.FC = () => {
           if (!remoteUsers || remoteUsers.length === 0) await syncUsers(finalUsers);
         }
 
-        const savedUser = localStorage.getItem('et_user');
-        if (savedUser) setCurrentUser(JSON.parse(savedUser));
+        const savedUserStr = localStorage.getItem('et_user');
+        if (savedUserStr) {
+          const savedUser = JSON.parse(savedUserStr);
+          // Re-verify the user against the latest remote list to ensure IDs match
+          const freshUser = finalUsers.find(u => u.email.toLowerCase() === savedUser.email.toLowerCase());
+          if (freshUser) {
+            setCurrentUser(freshUser);
+            localStorage.setItem('et_user', JSON.stringify(freshUser));
+          } else {
+            setCurrentUser(savedUser);
+          }
+        }
 
-        // Check for biometric support
         if (window.PublicKeyCredential) {
           const available = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
           setIsBiometricSupported(available);
@@ -91,7 +103,6 @@ const App: React.FC = () => {
     setCurrentUser(user);
     if (remember) localStorage.setItem('et_user', JSON.stringify(user));
     
-    // Check if biometric enrollment is needed
     const enrollmentKey = `biometric_enrolled_${user.email}`;
     const isEnrolled = localStorage.getItem(enrollmentKey);
     if (isBiometricSupported && !isEnrolled) {
@@ -134,14 +145,9 @@ const App: React.FC = () => {
   const bulkAddTools = async (newToolsList: Tool[]) => {
     setIsSyncing(true);
     try {
-      // For bulk sync, we merge existing and new (by ID) or replace.
-      // Usually a bulk upload replaces or upserts the items in the file.
       await syncTools(newToolsList);
-      
-      // Refresh local state
       const freshTools = await fetchTools();
       if (freshTools) setTools(freshTools);
-      
       setSyncSuccess(`Successfully imported ${newToolsList.length} assets.`);
       setSyncError(null);
       setTimeout(() => setSyncSuccess(null), 5000);
@@ -158,6 +164,8 @@ const App: React.FC = () => {
       await upsertSingleUser(newUser);
       const updatedUsers = [...allUsers, newUser];
       setAllUsers(updatedUsers);
+      setSyncSuccess(`User ${newUser.name} registered.`);
+      setTimeout(() => setSyncSuccess(null), 3000);
       setSyncError(null);
     } catch (e: any) {
       setSyncError(e.message || "Registration Failed");
@@ -175,6 +183,16 @@ const App: React.FC = () => {
       return matchesSearch && matchesStatus;
     });
   }, [tools, searchTerm, statusFilter]);
+
+  // Robust filtering for "My Tools" that handles both ID and Name matching (case-insensitive)
+  const myAssignedTools = useMemo(() => {
+    if (!currentUser) return [];
+    return tools.filter(t => {
+      const matchesId = t.currentHolderId === currentUser.id;
+      const matchesName = t.currentHolderName && t.currentHolderName.toLowerCase() === currentUser.name.toLowerCase();
+      return matchesId || matchesName;
+    });
+  }, [tools, currentUser]);
 
   if (isInitializing) {
     return (
@@ -233,7 +251,7 @@ const App: React.FC = () => {
       )}
 
       {view === 'MY_TOOLS' && (
-        <MyToolsView tools={tools.filter(t => t.currentHolderId === currentUser.id)} currentUser={currentUser} onUpdateTool={updateTool} />
+        <MyToolsView tools={myAssignedTools} currentUser={currentUser} onUpdateTool={updateTool} />
       )}
 
       {view === 'ADMIN_DASHBOARD' && (
@@ -242,6 +260,7 @@ const App: React.FC = () => {
           allUsers={allUsers} 
           onAddUser={addUser} 
           onBulkImport={bulkAddTools} 
+          userRole={currentUser.role}
         />
       )}
 
@@ -291,7 +310,6 @@ const LoginScreen: React.FC<{
   const [isBiometricEnrolled, setIsBiometricEnrolled] = useState(false);
 
   useEffect(() => {
-    // Check if the last known user had biometrics enrolled
     const lastUserStr = localStorage.getItem('et_user');
     if (lastUserStr) {
       const lastUser = JSON.parse(lastUserStr);
@@ -304,7 +322,6 @@ const LoginScreen: React.FC<{
   const handleSignIn = (e: React.FormEvent) => {
     e.preventDefault();
     const user = users.find(u => u.email.toLowerCase() === email.toLowerCase());
-    
     if (user) {
       onLogin(user, rememberMe);
     } else {
@@ -326,25 +343,20 @@ const LoginScreen: React.FC<{
   };
 
   return (
-    <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-center p-6">
+    <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-center p-6 text-center">
       <div className="w-full max-w-[420px] bg-white rounded-[3rem] p-10 pt-12 pb-14 shadow-2xl flex flex-col items-center">
-        {/* Logo Header */}
-        <div className="text-center mb-8">
+        <div className="mb-8">
           <img src={LOGO_URL} alt="Neda Builda Logo" className="h-16 mx-auto object-contain" />
         </div>
-
-        {/* Section Label */}
-        <div className="w-full text-center mb-8">
-          <span className="text-slate-300 text-[10px] font-black tracking-[0.3em] uppercase">Neda Tool</span>
+        <div className="w-full mb-8">
+          <span className="text-slate-300 text-[10px] font-black tracking-[0.3em] uppercase">Neda Tool Access</span>
         </div>
-
-        {/* Login Form */}
         <form onSubmit={handleSignIn} className="w-full space-y-4">
           <input 
             type="email" 
             placeholder="Work Email" 
             required
-            className="w-full bg-[#f8faff] border border-slate-100 rounded-2xl py-5 px-6 text-slate-600 font-medium placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-neda-navy/5 transition-all"
+            className="w-full bg-[#f8faff] border border-slate-100 rounded-2xl py-5 px-6 text-slate-600 font-medium placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-neda-navy/5 transition-all text-center"
             value={email}
             onChange={(e) => {
               setEmail(e.target.value);
@@ -356,13 +368,11 @@ const LoginScreen: React.FC<{
             type="password" 
             placeholder="Password" 
             required={!isBiometricEnrolled}
-            className="w-full bg-[#f8faff] border border-slate-100 rounded-2xl py-5 px-6 text-slate-600 font-medium placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-neda-navy/5 transition-all"
+            className="w-full bg-[#f8faff] border border-slate-100 rounded-2xl py-5 px-6 text-slate-600 font-medium placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-neda-navy/5 transition-all text-center"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
-
-          {error && <p className="text-red-500 text-[10px] font-bold uppercase text-center">{error}</p>}
-
+          {error && <p className="text-red-500 text-[10px] font-bold uppercase">{error}</p>}
           <div className="flex justify-between items-center px-1 py-2 mb-4">
             <label className="flex items-center gap-2 cursor-pointer group">
               <input 
@@ -377,7 +387,6 @@ const LoginScreen: React.FC<{
               Forgot?
             </button>
           </div>
-
           <div className="flex flex-col gap-3">
             <button 
               type="submit" 
@@ -385,7 +394,6 @@ const LoginScreen: React.FC<{
             >
               Sign In
             </button>
-
             {(isBiometricSupported && isBiometricEnrolled) && (
               <button 
                 type="button"
@@ -399,8 +407,6 @@ const LoginScreen: React.FC<{
           </div>
         </form>
       </div>
-      
-      {/* Footer Powered By */}
       <div className="mt-8 opacity-30">
         <p className="text-[8px] font-black uppercase tracking-[0.4em] text-neda-navy">Powered by Chrisonic</p>
       </div>
@@ -437,8 +443,8 @@ const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, status
             className="bg-white p-5 rounded-[1.5rem] border border-slate-100 shadow-sm text-left group active:scale-[0.98] transition-all"
           >
             <div className="flex justify-between items-start">
-              <div>
-                <h3 className="font-black text-neda-navy uppercase text-sm">{tool.name}</h3>
+              <div className="flex-1 min-w-0 pr-2">
+                <h3 className="font-black text-neda-navy uppercase text-sm truncate">{tool.name}</h3>
                 <p className="text-[9px] font-bold text-slate-400 uppercase mt-1">{tool.category}</p>
               </div>
               <StatusBadge status={tool.status} />
@@ -447,12 +453,12 @@ const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, status
               <div className="mt-4 pt-3 border-t border-slate-50 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <UserIcon size={12} className="text-neda-orange" />
-                  <span className="text-[9px] font-black text-neda-navy uppercase">{tool.currentHolderName}</span>
+                  <span className="text-[9px] font-black text-neda-navy uppercase truncate max-w-[80px]">{tool.currentHolderName}</span>
                 </div>
                 {tool.currentSite && (
-                  <div className="flex items-center gap-1">
-                    <MapPin size={10} className="text-slate-300" />
-                    <span className="text-[9px] font-bold text-slate-400">{tool.currentSite}</span>
+                  <div className="flex items-center gap-1 max-w-[120px]">
+                    <MapPin size={10} className="text-slate-300 shrink-0" />
+                    <span className="text-[9px] font-bold text-slate-400 truncate">{tool.currentSite}</span>
                   </div>
                 )}
               </div>
@@ -471,19 +477,50 @@ const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, status
 const MyToolsView: React.FC<any> = ({ tools, currentUser, onUpdateTool }) => {
   return (
     <div className="space-y-6">
-      <div className="bg-neda-navy p-8 rounded-[2.5rem] text-white">
-        <h2 className="text-3xl font-black uppercase">Field Kit</h2>
-        <p className="text-[10px] font-bold text-neda-orange uppercase mt-1 tracking-widest">{tools.length} Assets Assigned</p>
+      <div className="bg-neda-navy p-8 rounded-[2.5rem] text-white shadow-xl">
+        <div className="flex justify-between items-start">
+           <div>
+              <h2 className="text-3xl font-black uppercase">Field Kit</h2>
+              <p className="text-[9px] font-black text-neda-orange uppercase mt-1 tracking-widest">{currentUser.name}</p>
+           </div>
+           <div className="bg-white/10 p-3 rounded-2xl border border-white/5">
+              <Package size={24} className="text-white" />
+           </div>
+        </div>
+        <div className="mt-6 pt-4 border-t border-white/10">
+           <p className="text-[10px] font-bold text-white/60 uppercase tracking-widest">{tools.length} Assets Logged</p>
+        </div>
       </div>
       <div className="grid gap-3">
+        {tools.length === 0 && (
+          <div className="py-20 text-center">
+             <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-6 border border-slate-100">
+               <Package className="text-slate-200" size={32} />
+             </div>
+             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">No tools assigned to your profile</p>
+             <p className="text-[8px] font-bold text-slate-300 uppercase mt-2 tracking-widest">Check "Inventory" to book out gear</p>
+          </div>
+        )}
         {tools.map((tool: Tool) => (
-          <div key={tool.id} className="bg-white p-5 rounded-[1.5rem] border border-blue-100 shadow-md">
-            <h3 className="font-black text-neda-navy uppercase">{tool.name}</h3>
+          <div key={tool.id} className="bg-white p-6 rounded-[1.5rem] border border-blue-100 shadow-md animate-in fade-in slide-in-from-bottom-2">
+            <div className="flex justify-between items-start mb-4">
+               <div>
+                  <h3 className="font-black text-neda-navy uppercase text-sm">{tool.name}</h3>
+                  <p className="text-[8px] font-bold text-slate-300 uppercase mt-1">{tool.id}</p>
+               </div>
+               <div className="p-2 bg-slate-50 rounded-lg">
+                  <MapPin size={12} className="text-neda-orange" />
+               </div>
+            </div>
+            <div className="flex items-center gap-2 mb-6">
+              <span className="text-[9px] font-bold text-slate-400 uppercase">Site:</span>
+              <p className="text-[10px] font-black text-neda-navy uppercase truncate">{tool.currentSite || 'Warehouse'}</p>
+            </div>
             <button 
-              onClick={() => onUpdateTool({ ...tool, status: ToolStatus.AVAILABLE, currentHolderId: undefined, currentHolderName: undefined, currentSite: undefined })}
-              className="mt-4 w-full py-3 bg-slate-50 text-neda-navy border border-slate-100 rounded-xl font-black uppercase text-[10px] tracking-widest"
+              onClick={() => onUpdateTool({ ...tool, status: ToolStatus.AVAILABLE, currentHolderId: undefined, currentHolderName: undefined, currentSite: undefined, lastReturnedAt: Date.now() })}
+              className="w-full py-4 bg-white text-neda-navy border border-slate-100 rounded-xl font-black uppercase text-[10px] tracking-widest hover:bg-red-50 hover:text-red-500 hover:border-red-100 transition-all shadow-sm"
             >
-              Return to Warehouse
+              Log Return to Warehouse
             </button>
           </div>
         ))}
@@ -492,8 +529,9 @@ const MyToolsView: React.FC<any> = ({ tools, currentUser, onUpdateTool }) => {
   );
 };
 
-const AdminDashboard: React.FC<any> = ({ tools, allUsers, onAddUser, onBulkImport }) => {
+const AdminDashboard: React.FC<any> = ({ tools, allUsers, onAddUser, onBulkImport, userRole }) => {
   const [activeTab, setActiveTab] = useState<'STOCK' | 'USERS'>('STOCK');
+  const [showAddUser, setShowAddUser] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const downloadCSVTemplate = () => {
@@ -510,34 +548,29 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onAddUser, onBulkImpor
 
   const downloadInventoryCSV = () => {
     const headers = "id,equipment_tool,equipment_type,date_of_purchase,number_of_items,main_photo,current_holder_id,current_holder_name,current_site,status,notes,booked_at,last_returned_at,logs,serial_number";
-    
-    const csvRows = tools.map((t: Tool) => {
-      return [
-        t.id,
-        `"${t.name.replace(/"/g, '""')}"`,
-        `"${t.category.replace(/"/g, '""')}"`,
-        t.dateOfPurchase || '',
-        t.numberOfItems || 1,
-        t.mainPhoto || '',
-        t.currentHolderId || '',
-        `"${(t.currentHolderName || '').replace(/"/g, '""')}"`,
-        `"${(t.currentSite || '').replace(/"/g, '""')}"`,
-        t.status,
-        `"${(t.notes || '').replace(/"/g, '""')}"`,
-        t.bookedAt || '',
-        t.lastReturnedAt || '',
-        `"${JSON.stringify(t.logs).replace(/"/g, '""')}"`,
-        t.serialNumber || ''
-      ].join(',');
-    });
-
+    const csvRows = tools.map((t: Tool) => [
+      t.id,
+      `"${t.name.replace(/"/g, '""')}"`,
+      `"${t.category.replace(/"/g, '""')}"`,
+      t.dateOfPurchase || '',
+      t.numberOfItems || 1,
+      t.mainPhoto || '',
+      t.currentHolderId || '',
+      `"${(t.currentHolderName || '').replace(/"/g, '""')}"`,
+      `"${(t.currentSite || '').replace(/"/g, '""')}"`,
+      t.status,
+      `"${(t.notes || '').replace(/"/g, '""')}"`,
+      t.bookedAt || '',
+      t.lastReturnedAt || '',
+      `"${JSON.stringify(t.logs).replace(/"/g, '""')}"`,
+      t.serialNumber || ''
+    ].join(','));
     const csvContent = [headers, ...csvRows].join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = window.URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
     link.setAttribute("download", `neda_inventory_${new Date().toISOString().split('T')[0]}.csv`);
-    link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -551,7 +584,6 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onAddUser, onBulkImpor
       const text = event.target?.result as string;
       const lines = text.split(/\r?\n/).filter(l => l.trim());
       const dataLines = lines.slice(1);
-      
       const imported: Tool[] = dataLines.map(line => {
         const regex = /(?:,|\n|^)(?:"([^"]*(?:""[^"]*)*)"|([^,\n]*))/g;
         const parts: string[] = [];
@@ -559,17 +591,10 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onAddUser, onBulkImpor
         while ((match = regex.exec(line)) !== null) {
           parts.push(match[1] ? match[1].replace(/""/g, '"') : match[2]);
         }
-        
         const clean = (p: string) => p?.trim() || '';
-        
         const logsRaw = clean(parts[13]);
         let parsedLogs: ToolLog[] = [];
-        try {
-          if (logsRaw && logsRaw !== '[]' && logsRaw !== '') parsedLogs = JSON.parse(logsRaw);
-        } catch (e) {
-          console.warn("Could not parse logs for item", clean(parts[0]));
-        }
-
+        try { if (logsRaw && logsRaw !== '[]' && logsRaw !== '') parsedLogs = JSON.parse(logsRaw); } catch (e) {}
         return {
           id: clean(parts[0]) || 'T' + Math.random().toString(36).substr(2, 5).toUpperCase(),
           name: clean(parts[1]) || 'Unnamed',
@@ -613,19 +638,13 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onAddUser, onBulkImpor
               <h3 className="text-[12px] font-black uppercase tracking-widest text-neda-navy flex items-center gap-2">
                 <FileSpreadsheet size={16} className="text-neda-orange" /> Bulk Operations
               </h3>
-              <button 
-                onClick={downloadCSVTemplate}
-                className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5 hover:text-neda-navy transition-colors"
-              >
+              <button onClick={downloadCSVTemplate} className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5 hover:text-neda-navy transition-colors">
                 <Download size={12} /> Template
               </button>
             </div>
 
             <div className="space-y-3">
-              <button 
-                onClick={() => fileInputRef.current?.click()} 
-                className="w-full py-6 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between px-6 group hover:border-neda-orange transition-all"
-              >
+              <button onClick={() => fileInputRef.current?.click()} className="w-full py-6 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between px-6 group hover:border-neda-orange transition-all">
                 <div className="flex items-center gap-3">
                   <div className="p-2 bg-white rounded-xl border border-slate-100 group-hover:bg-neda-lightOrange transition-colors">
                     <Upload size={18} className="text-neda-navy group-hover:text-neda-orange" />
@@ -639,10 +658,7 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onAddUser, onBulkImpor
               </button>
               <input type="file" ref={fileInputRef} className="hidden" accept=".csv" onChange={handleImport} />
 
-              <button 
-                onClick={downloadInventoryCSV}
-                className="w-full py-6 bg-neda-navy text-white rounded-2xl flex items-center justify-between px-6 shadow-lg active:scale-[0.98] transition-all"
-              >
+              <button onClick={downloadInventoryCSV} className="w-full py-6 bg-neda-navy text-white rounded-2xl flex items-center justify-between px-6 shadow-lg active:scale-[0.98] transition-all">
                 <div className="flex items-center gap-3">
                   <div className="p-2 bg-white/10 rounded-xl">
                     <Download size={18} className="text-white" />
@@ -668,18 +684,65 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onAddUser, onBulkImpor
                 <div>
                   <p className="font-black text-neda-navy uppercase text-xs">{u.name}</p>
                   <p className="text-[9px] font-bold text-slate-300 uppercase">ID: {u.id}</p>
+                  <p className="text-[7px] font-bold text-slate-400 uppercase">{u.email}</p>
                 </div>
               </div>
-              <span className={`text-[8px] font-black uppercase px-2.5 py-1 rounded-lg ${u.role === UserRole.ADMIN ? 'bg-neda-navy text-white' : 'bg-slate-50 text-slate-400'}`}>
+              <span className={`text-[8px] font-black uppercase px-2.5 py-1 rounded-lg ${u.role !== UserRole.USER ? 'bg-neda-navy text-white' : 'bg-slate-50 text-slate-400'}`}>
                 {u.role}
               </span>
             </div>
           ))}
-          <button className="w-full py-5 border-2 border-dashed border-slate-200 rounded-[1.5rem] text-[10px] font-black uppercase text-slate-300 flex items-center justify-center gap-2 mt-4 hover:border-neda-orange hover:text-neda-orange transition-all">
+          <button 
+            onClick={() => setShowAddUser(true)}
+            className="w-full py-5 border-2 border-dashed border-slate-200 rounded-[1.5rem] text-[10px] font-black uppercase text-slate-300 flex items-center justify-center gap-2 mt-4 hover:border-neda-orange hover:text-neda-orange transition-all"
+          >
             <UserPlus size={16} /> Register New Person
           </button>
+          
+          {showAddUser && <AddUserModal onClose={() => setShowAddUser(false)} onAdd={onAddUser} />}
         </div>
       )}
+    </div>
+  );
+};
+
+const AddUserModal: React.FC<{ onClose: () => void; onAdd: (u: User) => void }> = ({ onClose, onAdd }) => {
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [role, setRole] = useState<UserRole>(UserRole.USER);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onAdd({
+      id: 'U' + Math.random().toString(36).substr(2, 6).toUpperCase(),
+      name,
+      email,
+      role,
+      isEnabled: true,
+      password: 'password123'
+    });
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-[200] bg-neda-navy/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in">
+      <div className="bg-white w-full max-w-sm rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 pb-10 shadow-2xl animate-in slide-in-from-bottom-10">
+        <div className="flex justify-between items-center mb-6">
+          <h2 className="text-xl font-black text-neda-navy uppercase">Register User</h2>
+          <button onClick={onClose} className="p-2 bg-slate-50 rounded-xl"><X size={20} /></button>
+        </div>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <input placeholder="Full Name (e.g. Callum Law)" required className="w-full p-4 bg-slate-50 rounded-2xl font-bold text-sm border border-slate-100" value={name} onChange={e => setName(e.target.value)} />
+          <input type="email" placeholder="Email Address" required className="w-full p-4 bg-slate-50 rounded-2xl font-bold text-sm border border-slate-100" value={email} onChange={e => setEmail(e.target.value)} />
+          <div className="flex gap-2">
+             <button type="button" onClick={() => setRole(UserRole.USER)} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase border transition-all ${role === UserRole.USER ? 'bg-neda-navy text-white border-neda-navy' : 'bg-white border-slate-100 text-slate-400'}`}>Staff</button>
+             <button type="button" onClick={() => setRole(UserRole.MANAGER)} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase border transition-all ${role === UserRole.MANAGER ? 'bg-neda-navy text-white border-neda-navy' : 'bg-white border-slate-100 text-slate-400'}`}>Manager</button>
+          </div>
+          <button type="submit" className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg mt-4 flex items-center justify-center gap-2">
+             <Save size={18} /> Register Personnel
+          </button>
+        </form>
+      </div>
     </div>
   );
 };
@@ -688,6 +751,11 @@ const ToolModal: React.FC<any> = ({ tool, onClose, currentUser, onUpdate }) => {
   const [site, setSite] = useState(tool.currentSite || '');
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
+
+  const isManagement = currentUser.role === UserRole.ADMIN || currentUser.role === UserRole.MANAGER;
+  const isAvailable = tool.status === ToolStatus.AVAILABLE;
+  const isHeldByMe = tool.currentHolderId === currentUser.id || (tool.currentHolderName && tool.currentHolderName.toLowerCase() === currentUser.name.toLowerCase());
+  const canBook = isAvailable || (isManagement && !isHeldByMe);
 
   useEffect(() => {
     const delayDebounceFn = setTimeout(async () => {
@@ -705,7 +773,6 @@ const ToolModal: React.FC<any> = ({ tool, onClose, currentUser, onUpdate }) => {
         setSuggestions([]);
       }
     }, 450);
-
     return () => clearTimeout(delayDebounceFn);
   }, [site]);
 
@@ -721,67 +788,113 @@ const ToolModal: React.FC<any> = ({ tool, onClose, currentUser, onUpdate }) => {
     onClose();
   };
 
+  const handleReturn = async () => {
+    await onUpdate({
+      ...tool,
+      status: ToolStatus.AVAILABLE,
+      currentHolderId: undefined,
+      currentHolderName: undefined,
+      currentSite: undefined,
+      lastReturnedAt: Date.now()
+    });
+    onClose();
+  };
+
   return (
     <div className="fixed inset-0 z-[150] bg-neda-navy/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in">
       <div className="bg-white w-full max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 shadow-2xl animate-in slide-in-from-bottom-10 overflow-visible">
         <div className="flex justify-between items-start mb-6">
-          <div>
-            <h2 className="text-xl font-black text-neda-navy uppercase">{tool.name}</h2>
-            <p className="text-[9px] font-bold text-slate-300 uppercase tracking-widest mt-0.5">{tool.id} • {tool.category}</p>
+          <div className="min-w-0 pr-4">
+            <h2 className="text-xl font-black text-neda-navy uppercase truncate">{tool.name}</h2>
+            <p className="text-[9px] font-bold text-slate-300 uppercase tracking-widest mt-0.5 truncate">{tool.id} • {tool.category}</p>
           </div>
           <button onClick={onClose} className="p-2 bg-slate-50 rounded-xl transition-colors hover:bg-slate-100"><X size={20} /></button>
         </div>
         
         <div className="space-y-4 relative">
-          <div className="relative">
-            <div className="flex items-center bg-slate-50 border border-slate-100 rounded-2xl px-4 focus-within:ring-2 focus-within:ring-neda-navy/10 transition-all">
-              <MapPin size={18} className="text-slate-300" />
-              <input 
-                placeholder="Assign to Site Address..." 
-                className="flex-1 p-4 bg-transparent font-bold outline-none text-sm"
-                value={site}
-                onChange={(e) => setSite(e.target.value)}
-              />
-              {isLoadingSuggestions && <Loader2 size={16} className="animate-spin text-neda-orange" />}
+          {!isAvailable && (
+            <div className="p-5 bg-neda-lightOrange rounded-2xl border border-neda-orange/20">
+               <div className="flex items-center gap-4">
+                  <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center border border-neda-orange/10">
+                     <UserIcon size={18} className="text-neda-orange" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[8px] font-black text-neda-orange uppercase tracking-[0.2em]">Current Holder</p>
+                    <p className="text-xs font-black text-neda-navy uppercase mt-0.5 truncate">{tool.currentHolderName}</p>
+                    {tool.currentSite && (
+                      <p className="text-[8px] font-bold text-slate-400 mt-1 uppercase truncate">Site: {tool.currentSite}</p>
+                    )}
+                  </div>
+                  {isHeldByMe && <CheckCircle size={16} className="text-green-500 shrink-0" />}
+               </div>
             </div>
+          )}
 
-            {suggestions.length > 0 && (
-              <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-slate-100 rounded-2xl shadow-2xl z-[160] overflow-hidden animate-in slide-in-from-top-2">
-                {suggestions.map((addr, idx) => (
-                  <button 
-                    key={idx}
-                    onClick={() => {
-                      setSite(addr);
-                      setSuggestions([]);
-                    }}
-                    className="w-full text-left px-5 py-4 hover:bg-slate-50 text-[10px] font-black uppercase tracking-wider text-neda-navy border-b border-slate-50 last:border-0 transition-colors"
-                  >
-                    {addr}
-                  </button>
-                ))}
+          {canBook ? (
+            <>
+              <div className="relative">
+                <div className="flex items-center bg-slate-50 border border-slate-100 rounded-2xl px-4 focus-within:ring-2 focus-within:ring-neda-navy/10 transition-all">
+                  <MapPin size={18} className="text-slate-300" />
+                  <input 
+                    placeholder="Assign to Site Address..." 
+                    className="flex-1 p-4 bg-transparent font-bold outline-none text-sm"
+                    value={site}
+                    onChange={(e) => setSite(e.target.value)}
+                  />
+                  {isLoadingSuggestions && <Loader2 size={16} className="animate-spin text-neda-orange" />}
+                </div>
+
+                {suggestions.length > 0 && (
+                  <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-slate-100 rounded-2xl shadow-2xl z-[160] overflow-hidden animate-in slide-in-from-top-2">
+                    {suggestions.map((addr, idx) => (
+                      <button 
+                        key={idx}
+                        onClick={() => { setSite(addr); setSuggestions([]); }}
+                        className="w-full text-left px-5 py-4 hover:bg-slate-50 text-[10px] font-black uppercase tracking-wider text-neda-navy border-b border-slate-50 last:border-0 transition-colors"
+                      >
+                        {addr}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
 
-          <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100">
-             <div className="flex items-center gap-4">
-                <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center border border-slate-100">
-                   <UserIcon size={18} className="text-neda-orange" />
+              <div className="flex gap-2">
+                <button 
+                  onClick={handleAssign} 
+                  disabled={!site.trim()}
+                  className="flex-1 py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-[0.98] transition-all disabled:opacity-30 disabled:bg-slate-200"
+                >
+                  {isAvailable ? 'Book Out' : 'Override / Reassign'}
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="space-y-3">
+              {isHeldByMe ? (
+                <button 
+                  onClick={handleReturn}
+                  className="w-full py-5 bg-white border-2 border-neda-navy text-neda-navy rounded-2xl font-black uppercase tracking-widest shadow-sm active:scale-95 transition-all"
+                >
+                  Return to Warehouse
+                </button>
+              ) : (
+                <div className="p-4 bg-slate-50 rounded-2xl flex items-center justify-center gap-3 border border-slate-100 text-center">
+                  <Lock size={16} className="text-slate-300" />
+                  <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Read-Only Asset</span>
                 </div>
-                <div>
-                  <p className="text-[8px] font-black text-slate-300 uppercase tracking-[0.2em]">Logging Deployment</p>
-                  <p className="text-xs font-black text-neda-navy uppercase mt-0.5">{currentUser.name}</p>
-                </div>
-             </div>
-          </div>
+              )}
+            </div>
+          )}
 
-          <button 
-            onClick={handleAssign} 
-            disabled={!site.trim()}
-            className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-[0.98] transition-all disabled:opacity-30 disabled:bg-slate-200"
-          >
-            Confirm Deployment
-          </button>
+          {isManagement && !isAvailable && (
+            <button 
+              onClick={handleReturn}
+              className="w-full py-3 text-[9px] font-black text-slate-300 uppercase tracking-widest flex items-center justify-center gap-2 hover:text-red-500 transition-colors"
+            >
+              <ShieldAlert size={12} /> Admin Force Return
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -799,7 +912,7 @@ const StatCard: React.FC<any> = ({ label, value, color }) => (
 const StatusBadge: React.FC<any> = ({ status }) => {
   const isAvailable = status === ToolStatus.AVAILABLE;
   return (
-    <span className={`text-[8px] font-black uppercase px-2 py-1 rounded-lg ${isAvailable ? 'bg-green-100 text-green-700' : 'bg-neda-lightOrange text-neda-orange'}`}>
+    <span className={`text-[8px] font-black uppercase px-2 py-1 rounded-lg shrink-0 ${isAvailable ? 'bg-green-100 text-green-700' : 'bg-neda-lightOrange text-neda-orange'}`}>
       {isAvailable ? 'Warehouse' : 'On Site'}
     </span>
   );
@@ -832,11 +945,7 @@ const AIAssistant: React.FC<any> = ({ tools }) => {
             onChange={(e) => setQuery(e.target.value)}
             onKeyPress={(e) => e.key === 'Enter' && handleAsk()}
           />
-          <button 
-            onClick={handleAsk} 
-            disabled={loading}
-            className="p-4 bg-neda-navy text-white rounded-2xl active:scale-95 transition-all disabled:opacity-50"
-          >
+          <button onClick={handleAsk} disabled={loading} className="p-4 bg-neda-navy text-white rounded-2xl active:scale-95 transition-all disabled:opacity-50">
             {loading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
           </button>
         </div>
