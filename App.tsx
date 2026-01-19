@@ -100,17 +100,20 @@ const App: React.FC = () => {
     setCurrentUser(user);
     if (remember) {
       localStorage.setItem('et_user', JSON.stringify(user));
-      // Trigger prompt if biometrics not already enabled for this user
-      if (!localStorage.getItem(`bio_enabled_${user.id}`)) {
-        setShowBiometricPrompt(true);
-      }
+    }
+    // Always store the last user email to facilitate biometrics for the right person
+    localStorage.setItem('et_last_email', user.email);
+    
+    // Trigger prompt if biometrics not already enabled for this specific user
+    if (!localStorage.getItem(`bio_enabled_${user.id}`)) {
+      // Delay prompt slightly for better UX
+      setTimeout(() => setShowBiometricPrompt(true), 1000);
     }
   };
 
   const handleLogout = () => {
     setCurrentUser(null);
     localStorage.removeItem('et_user');
-    // We don't remove bio settings on logout so they can log back in with bio
   };
 
   const enableBiometrics = () => {
@@ -292,31 +295,35 @@ const LoginScreen: React.FC<{
 }> = ({ onLogin, users, onResetPassword }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(true);
   const [error, setError] = useState('');
   const [showResetModal, setShowResetModal] = useState(false);
   const [bioUser, setBioUser] = useState<User | null>(null);
 
   useEffect(() => {
     // Check if there was a previous user who enabled biometrics
-    const saved = localStorage.getItem('et_user');
-    if (saved) {
-      const u = JSON.parse(saved) as User;
-      if (localStorage.getItem(`bio_enabled_${u.id}`)) {
-        setBioUser(u);
+    const lastEmail = localStorage.getItem('et_last_email');
+    if (lastEmail) {
+      const user = users.find(u => u.email.toLowerCase() === lastEmail.toLowerCase());
+      if (user && localStorage.getItem(`bio_enabled_${user.id}`)) {
+        setBioUser(user);
       }
     }
-  }, []);
+  }, [users]);
 
   const handleLoginAttempt = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const user = users.find(u => u.email.toLowerCase() === email.toLowerCase() && u.password === password);
-    if (user && user.isEnabled) onLogin(user, true);
-    else setError('Invalid credentials or account disabled.');
+    if (user && user.isEnabled) {
+      onLogin(user, rememberMe);
+    } else {
+      setError('Invalid credentials or account disabled.');
+    }
   };
 
   const handleBioLogin = () => {
     if (!bioUser) return;
-    // Mocking the biometric success
+    // Simulate a biometric check success
     onLogin(bioUser, true);
   };
 
@@ -340,29 +347,31 @@ const LoginScreen: React.FC<{
                 <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto border border-slate-100">
                   <UserIcon size={32} className="text-neda-navy" />
                 </div>
-                <h2 className="font-black text-neda-navy uppercase">Welcome back, {bioUser.name.split(' ')[0]}</h2>
+                <div className="space-y-1">
+                  <h2 className="font-black text-neda-navy uppercase">Welcome back</h2>
+                  <p className="text-xs font-bold text-neda-orange uppercase tracking-wider">{bioUser.name}</p>
+                </div>
              </div>
-             <button 
-               onClick={handleBioLogin}
-               className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all flex items-center justify-center gap-3"
-             >
-               <Fingerprint size={20} /> Use Biometrics
-             </button>
-             <button 
-               onClick={() => {
-                 setBioUser(null);
-                 setEmail(bioUser.email);
-               }}
-               className="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-neda-orange transition-colors"
-             >
-               Use different account
-             </button>
+             <div className="space-y-3">
+               <button 
+                 onClick={handleBioLogin}
+                 className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all flex items-center justify-center gap-3"
+               >
+                 <Fingerprint size={20} /> Use Biometrics
+               </button>
+               <button 
+                 onClick={() => setBioUser(null)}
+                 className="w-full py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-neda-orange transition-colors"
+               >
+                 Use different account
+               </button>
+             </div>
           </div>
         ) : (
           <form onSubmit={handleLoginAttempt} className="space-y-5">
             <input 
               type="email" 
-              placeholder="Email" 
+              placeholder="Work Email" 
               className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-2 focus:ring-neda-orange transition-all font-semibold" 
               value={email} 
               onChange={e => setEmail(e.target.value)} 
@@ -377,13 +386,24 @@ const LoginScreen: React.FC<{
                 onChange={e => setPassword(e.target.value)} 
                 required 
               />
-              <button 
-                type="button" 
-                onClick={() => setShowResetModal(true)}
-                className="text-[10px] font-black text-neda-orange uppercase tracking-[0.15em] mx-auto block hover:opacity-70 transition-opacity"
-              >
-                Forgot Password?
-              </button>
+              <div className="flex items-center justify-between px-1">
+                <label className="flex items-center gap-2 cursor-pointer group">
+                  <input 
+                    type="checkbox" 
+                    checked={rememberMe}
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                    className="w-4 h-4 rounded border-slate-200 text-neda-orange focus:ring-neda-orange cursor-pointer"
+                  />
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest group-hover:text-neda-navy transition-colors">Remember Me</span>
+                </label>
+                <button 
+                  type="button" 
+                  onClick={() => setShowResetModal(true)}
+                  className="text-[10px] font-black text-neda-orange uppercase tracking-[0.15em] hover:opacity-70 transition-opacity"
+                >
+                  Forgot?
+                </button>
+              </div>
             </div>
             {error && <p className="text-red-500 text-[10px] font-black text-center">{error}</p>}
             <button type="submit" className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all">Sign In</button>
@@ -892,7 +912,7 @@ const AddToolModal: React.FC<{ onClose: () => void; onAdd: (t: Tool) => Promise<
   };
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-neda-navy/60 backdrop-blur-sm p-4 animate-in fade-in">
-      <form onSubmit={handleSubmit} className="bg-white w-full max-sm rounded-[2.5rem] p-8 space-y-5 shadow-2xl scale-in-95 animate-in">
+      <form onSubmit={handleSubmit} className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 space-y-5 shadow-2xl scale-in-95 animate-in">
         <h2 className="text-xl font-black text-neda-navy uppercase tracking-tight">Register Asset</h2>
         <div className="space-y-4">
           <input type="text" placeholder="Asset Name" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold outline-none" value={name} onChange={e => setName(e.target.value)} required />
