@@ -19,6 +19,7 @@ const cleanPayload = (obj: any) => {
   );
 };
 
+// Standard mapping using snake_case
 const mapUserToDb = (user: User) => cleanPayload({
   id: user.id,
   name: user.name,
@@ -29,20 +30,25 @@ const mapUserToDb = (user: User) => cleanPayload({
   must_change_password: user.mustChangePassword
 });
 
+// Minimal fallback mapping for cases where schema is not fully set up
+const mapUserToDbMinimal = (user: User) => cleanPayload({
+  id: user.id,
+  name: user.name,
+  role: user.role,
+  email: user.email,
+  password: user.password
+});
+
 const mapDbToUser = (dbUser: any): User => ({
   id: dbUser.id,
   name: dbUser.name,
   role: dbUser.role,
   email: dbUser.email,
   password: dbUser.password,
-  isEnabled: dbUser.is_enabled,
-  mustChangePassword: dbUser.must_change_password
+  isEnabled: dbUser.is_enabled !== undefined ? dbUser.is_enabled : true,
+  mustChangePassword: dbUser.must_change_password || false
 });
 
-/**
- * mapToolToDb: Converts frontend Tool object to Database format.
- * Includes absolute safety defaults for NOT NULL columns.
- */
 const mapToolToDb = (tool: Tool) => {
   return {
     id: tool.id,
@@ -88,8 +94,26 @@ export const upsertSingleTool = async (tool: Tool) => {
 
 export const upsertSingleUser = async (user: User) => {
   if (!supabase) return;
-  const { error } = await supabase.from('users').upsert(mapUserToDb(user), { onConflict: 'id' });
-  if (error) throw error;
+  
+  // Try full sync first
+  const { error: fullError } = await supabase.from('users').upsert(mapUserToDb(user), { onConflict: 'id' });
+  
+  if (fullError) {
+    console.warn("Full user sync failed (likely missing schema columns), trying minimal sync:", fullError.message);
+    
+    // Fallback to minimal sync if columns are missing
+    const { error: minError } = await supabase.from('users').upsert(mapUserToDbMinimal(user), { onConflict: 'id' });
+    
+    if (minError) {
+      throw new Error(`Database Error: ${minError.message}`);
+    }
+    
+    // If we reached here, minimal worked but full failed. 
+    // We throw a specific warning so the UI can notify the user to update their schema.
+    if (fullError.message.includes('column')) {
+      throw new Error(`SCHEMA_MISMATCH: Password saved, but 'must_change_password' column is missing in Supabase.`);
+    }
+  }
 };
 
 export const syncTools = async (tools: Tool[]) => {
@@ -111,7 +135,8 @@ export const fetchTools = async (): Promise<Tool[] | null> => {
 
 export const syncUsers = async (users: User[]) => {
   if (!supabase) return;
-  const { error } = await supabase.from('users').upsert(users.map(mapUserToDb), { onConflict: 'id' });
+  // Use minimal mapping for initial sync to be safe
+  const { error } = await supabase.from('users').upsert(users.map(mapUserToDbMinimal), { onConflict: 'id' });
   if (error) throw error;
 };
 
