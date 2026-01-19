@@ -556,7 +556,6 @@ const AdminDashboard: React.FC<{
       const dataLines = lines.slice(1);
       
       const newTools: Tool[] = dataLines.map(line => {
-        // Robust split that respects quotes (for dates like "Jan 19, 2024")
         const parts = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
         const clean = (p: string) => p?.replace(/^"|"$/g, '').trim() || '';
         
@@ -570,12 +569,14 @@ const AdminDashboard: React.FC<{
           id: clean(parts[0]) || 'T' + Math.random().toString(36).substr(2, 5).toUpperCase(),
           name: clean(parts[1]) || 'Unnamed Asset',
           category: clean(parts[2]) || 'General',
+          dateOfPurchase: clean(parts[3]),
+          numberOfItems: parseInt(clean(parts[4])) || 1,
           mainPhoto: clean(parts[5]) || undefined,
           currentHolderId: clean(parts[6]) || undefined,
           currentHolderName: clean(parts[7]) || undefined,
           currentSite: clean(parts[8]) || undefined,
           status: statusMap(parts[9]),
-          notes: clean(parts[10]), // Extract notes from index 10
+          notes: clean(parts[10]),
           logs: []
         };
       });
@@ -594,7 +595,7 @@ const AdminDashboard: React.FC<{
         </div>
       )}
       {activeTab === 'USERS' && (
-        <div className="space-y-4 animate-in fade-in duration-300"><button onClick={() => setShowUserModal(true)} className="w-full py-4 bg-white border-2 border-dashed border-neda-navy/20 text-neda-navy rounded-2xl flex items-center justify-center gap-3 font-black text-xs uppercase hover:bg-slate-50 transition-colors"><UserPlus size={18} /> Register Personnel</button><div className="grid gap-3">{allUsers.map(user => (<div key={user.id} className="bg-white border border-slate-100 p-4 rounded-2xl shadow-sm relative overflow-hidden group"><div className="flex items-center justify-between"><div className="flex items-center gap-3"><div className="w-10 h-10 bg-neda-lightNavy rounded-full flex items-center justify-center font-black text-neda-navy text-sm uppercase">{user.name.charAt(0)}</div><div><p className="text-sm font-black text-neda-navy uppercase tracking-tight">{user.name}</p><p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{user.role} • {user.email}</p></div></div><div className="flex items-center gap-1"><button onClick={() => setEditingUser(user)} className="p-2 text-slate-300 hover:text-neda-navy transition-colors"><Edit size={16} /></button><button onClick={() => onUpdateUser({...user, isEnabled: !user.isEnabled})} className={`p-2 transition-colors ${user.isEnabled ? 'text-green-500 hover:bg-green-50 rounded-xl' : 'text-slate-200 hover:bg-slate-50 rounded-xl'}`}>{user.isEnabled ? <CheckCircle2 size={18} /> : <Trash2 size={18} />}</button></div></div><div className="mt-3 pt-3 border-t border-slate-50 flex items-center justify-between"><div className="flex items-center gap-2"><Lock size={12} className="text-slate-300" /><span className="text-[10px] font-mono font-bold text-neda-navy/40">{showPasswords[user.id] ? user.password : '••••••••'}</span></div><button onClick={() => togglePasswordVisibility(user.id)} className="text-[9px] font-black text-neda-orange uppercase tracking-widest">{showPasswords[user.id] ? 'Hide' : 'Reveal'}</span></div></div>))}</div></div>
+        <div className="space-y-4 animate-in fade-in duration-300"><button onClick={() => setShowUserModal(true)} className="w-full py-4 bg-white border-2 border-dashed border-neda-navy/20 text-neda-navy rounded-2xl flex items-center justify-center gap-3 font-black text-xs uppercase hover:bg-slate-50 transition-colors"><UserPlus size={18} /> Register Personnel</button><div className="grid gap-3">{allUsers.map(user => (<div key={user.id} className="bg-white border border-slate-100 p-4 rounded-2xl shadow-sm relative overflow-hidden group"><div className="flex items-center justify-between"><div className="flex items-center gap-3"><div className="w-10 h-10 bg-neda-lightNavy rounded-full flex items-center justify-center font-black text-neda-navy text-sm uppercase">{user.name.charAt(0)}</div><div><p className="text-sm font-black text-neda-navy uppercase tracking-tight">{user.name}</p><p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{user.role} • {user.email}</p></div></div><div className="flex items-center gap-1"><button onClick={() => setEditingUser(user)} className="p-2 text-slate-300 hover:text-neda-navy transition-colors"><Edit size={16} /></button><button onClick={() => onUpdateUser({...user, isEnabled: !user.isEnabled})} className={`p-2 transition-colors ${user.isEnabled ? 'text-green-500 hover:bg-green-50 rounded-xl' : 'text-slate-200 hover:bg-slate-50 rounded-xl'}`}>{user.isEnabled ? <CheckCircle2 size={18} /> : <Trash2 size={18} />}</button></div></div><div className="mt-3 pt-3 border-t border-slate-50 flex items-center justify-between"><div className="flex items-center gap-2"><Lock size={12} className="text-slate-300" /><span className="text-[10px] font-mono font-bold text-neda-navy/40">{showPasswords[user.id] ? user.password : '••••••••'}</span></div><button onClick={() => togglePasswordVisibility(user.id)} className="text-[9px] font-black text-neda-orange uppercase tracking-widest">{showPasswords[user.id] ? 'Hide' : 'Reveal'}</button></div></div>))}</div></div>
       )}
       {showUserModal && <AddUserModal onClose={() => setShowUserModal(false)} onAdd={async (u) => { await onAddUser(u); setShowUserModal(false); }} />}
       {editingUser && <EditUserModal user={editingUser} onClose={() => setEditingUser(null)} onUpdate={async (u) => { await onUpdateUser(u); setEditingUser(null); }} />}
@@ -629,7 +630,7 @@ const ToolModal: React.FC<{ tool: Tool; onClose: () => void; currentUser: User; 
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-neda-navy/60 backdrop-blur-sm p-0 sm:p-4">
-      <div className="bg-white w-full max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 shadow-2xl relative max-h-[90vh] overflow-y-auto animate-in slide-in-from-bottom-10 sm:slide-in-from-bottom-0">
+      <div className="bg-white w-full max-md rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 shadow-2xl relative max-h-[90vh] overflow-y-auto animate-in slide-in-from-bottom-10 sm:slide-in-from-bottom-0">
         <div className="flex justify-between items-center mb-6"><div><h2 className="text-xl font-black text-neda-navy uppercase tracking-tighter">{tool.name}</h2><p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">Asset ID: {tool.id}</p></div><button onClick={onClose} className="p-2 bg-slate-50 rounded-xl"><X size={20} /></button></div>
         {action === 'IDLE' && (<div className="space-y-6"><div className="flex justify-between items-center"><StatusBadge status={tool.status} /><span className="text-[10px] font-black text-slate-300 uppercase">{tool.category || 'General'}</span></div>{tool.status === ToolStatus.AVAILABLE && <button onClick={() => setAction('BOOKING')} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest active:scale-95 transition-all">Assign to Site</button>}{tool.status === ToolStatus.BOOKED_OUT && tool.currentHolderId === currentUser.id && <button onClick={() => setAction('RETURNING')} className="w-full py-5 bg-green-600 text-white rounded-2xl font-black uppercase tracking-widest active:scale-95 transition-all">Confirm Return</button>}</div>)}
         {action === 'BOOKING' && (<div className="space-y-4 animate-in slide-in-from-right-4"><div className="space-y-1"><label className="text-[9px] font-black text-neda-navy/40 uppercase tracking-widest ml-1">Site Location</label><input type="text" placeholder="e.g. Waterfront Project" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm outline-none" value={site} onChange={e => setSite(e.target.value)} /></div><button onClick={handleBooking} disabled={!site || loading} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest disabled:opacity-50 active:scale-95 transition-all flex items-center justify-center gap-2">{loading && <Loader2 className="animate-spin" size={18} />} Assign Deployment</button></div>)}
@@ -648,7 +649,7 @@ const AddToolModal: React.FC<{ onClose: () => void; onAdd: (t: Tool) => Promise<
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    try { await onAdd({ id: 'T' + Math.random().toString(36).substr(2, 5).toUpperCase(), name, category, serialNumber: serial || undefined, status: ToolStatus.AVAILABLE, logs: [{ id: 'L' + Date.now(), userId: currentUser.id, userName: currentUser.name, action: 'CREATE', timestamp: Date.now() }] }); } catch (e) {} finally { setLoading(false); }
+    try { await onAdd({ id: 'T' + Math.random().toString(36).substr(2, 5).toUpperCase(), name, category, serialNumber: serial || undefined, status: ToolStatus.AVAILABLE, notes: '', logs: [{ id: 'L' + Date.now(), userId: currentUser.id, userName: currentUser.name, action: 'CREATE', timestamp: Date.now() }] }); } catch (e) {} finally { setLoading(false); }
   };
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-neda-navy/60 backdrop-blur-sm p-4 animate-in fade-in">

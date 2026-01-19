@@ -17,7 +17,7 @@ export interface User {
   name: string;
   role: UserRole;
   email: string;
-  password?: string; // For mock login demonstration
+  password?: string;
   isEnabled: boolean;
 }
 
@@ -29,22 +29,24 @@ export interface ToolLog {
   timestamp: number;
   site?: string;
   comment?: string;
-  photo?: string; // Captures condition at time of action
+  photo?: string;
 }
 
 export interface Tool {
   id: string;
   name: string;
-  category?: string;
-  serialNumber?: string; // Made optional as requested and per DB schema
+  category: string;
+  serialNumber?: string;
   status: ToolStatus;
   currentHolderId?: string;
   currentHolderName?: string;
   currentSite?: string;
   bookedAt?: number;
   lastReturnedAt?: number;
-  mainPhoto?: string; // Original photo of the asset
-  notes?: string;
+  mainPhoto?: string;
+  notes: string;
+  dateOfPurchase?: string;
+  numberOfItems?: number;
   logs: ToolLog[];
 }
 

@@ -13,7 +13,6 @@ if (!supabase) {
   console.warn("Supabase Client: Missing Credentials. Please check environment variables.");
 }
 
-// Utility to remove undefined/null keys so Supabase doesn't try to map them to missing columns
 const cleanPayload = (obj: any) => {
   return Object.fromEntries(
     Object.entries(obj).filter(([_, v]) => v !== undefined && v !== null)
@@ -39,17 +38,20 @@ const mapDbToUser = (dbUser: any): User => ({
 });
 
 const mapToolToDb = (tool: Tool) => {
-  // Mapping local Tool object to the actual Supabase table columns.
+  // We explicitly include all columns that might have NOT NULL constraints
+  // and provide fallbacks to empty strings or defaults.
   return cleanPayload({
     id: tool.id,
-    equipment_tool: tool.name,
-    equipment_type: tool.category,
-    status: tool.status,
+    equipment_tool: tool.name || 'Unnamed Asset',
+    equipment_type: tool.category || 'General',
+    status: tool.status || ToolStatus.AVAILABLE,
     current_holder_id: tool.currentHolderId,
     current_holder_name: tool.currentHolderName,
     current_site: tool.currentSite,
     main_photo: tool.mainPhoto,
-    notes: tool.notes || '', // Satisfy NOT NULL constraint
+    notes: tool.notes || '', // FIX: Explicitly send empty string if notes is missing
+    date_of_purchase: tool.dateOfPurchase,
+    number_of_items: tool.numberOfItems || 1
   });
 };
 
@@ -66,6 +68,8 @@ const mapDbToTool = (dbTool: any): Tool => ({
   lastReturnedAt: dbTool.last_returned_at,
   mainPhoto: dbTool.main_photo,
   notes: dbTool.notes || '',
+  dateOfPurchase: dbTool.date_of_purchase,
+  numberOfItems: dbTool.number_of_items,
   logs: dbTool.logs || []
 });
 
@@ -117,7 +121,7 @@ export const syncUsers = async (users: User[]) => {
 
 export const fetchUsers = async (): Promise<User[] | null> => {
   if (!supabase) return null;
-  const { data, error } = await supabase.from('tools').select('*');
+  const { data, error } = await supabase.from('users').select('*');
   if (error) {
     console.error('Error fetching users:', error);
     return null;

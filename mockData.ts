@@ -43,6 +43,8 @@ export const INITIAL_TOOLS: Tool[] = [
     category: 'Power Tools',
     serialNumber: 'DW-99122',
     status: ToolStatus.AVAILABLE,
+    // Fix: Added missing required notes property
+    notes: '',
     logs: []
   },
   {
@@ -55,6 +57,8 @@ export const INITIAL_TOOLS: Tool[] = [
     currentHolderName: 'Gavin Builder',
     currentSite: 'Main St Apartments',
     bookedAt: Date.now() - 86400000 * 2,
+    // Fix: Added missing required notes property
+    notes: '',
     logs: []
   },
   {
@@ -63,6 +67,8 @@ export const INITIAL_TOOLS: Tool[] = [
     category: 'Precision',
     serialNumber: 'FS-778',
     status: ToolStatus.AVAILABLE,
+    // Fix: Added missing required notes property
+    notes: '',
     logs: []
   },
   {
@@ -71,6 +77,8 @@ export const INITIAL_TOOLS: Tool[] = [
     category: 'Power',
     serialNumber: 'HG-2000',
     status: ToolStatus.UNDER_REPAIR,
+    // Fix: Added missing required notes property
+    notes: '',
     logs: []
   }
 ];
