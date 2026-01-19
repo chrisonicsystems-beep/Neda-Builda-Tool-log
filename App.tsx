@@ -101,11 +101,11 @@ const App: React.FC = () => {
     if (remember) {
       localStorage.setItem('et_user', JSON.stringify(user));
     }
-    // Always store the last user's info for biometric login identify
+    // Store last email to identify user for biometrics on next launch
     localStorage.setItem('et_last_email', user.email);
     
-    // Trigger prompt if biometrics not already enabled for this specific user
-    if (!localStorage.getItem(`bio_enabled_${user.id}`)) {
+    // Prompt to enable biometrics if not already enabled
+    if (localStorage.getItem(`bio_enabled_${user.id}`) !== 'true') {
       setTimeout(() => setShowBiometricPrompt(true), 1200);
     }
   };
@@ -113,6 +113,8 @@ const App: React.FC = () => {
   const handleLogout = () => {
     setCurrentUser(null);
     localStorage.removeItem('et_user');
+    // Important: We do NOT remove the bio_enabled key or last_email here
+    // as those are needed to trigger the "Use Biometrics" button on return.
   };
 
   const enableBiometrics = () => {
@@ -122,6 +124,7 @@ const App: React.FC = () => {
   };
 
   const updateTool = async (updatedTool: Tool) => {
+    const oldTools = [...tools];
     setTools(prev => prev.map(t => t.id === updatedTool.id ? updatedTool : t));
     setIsSyncing(true);
     try {
@@ -129,12 +132,14 @@ const App: React.FC = () => {
       setSyncError(null);
     } catch (e: any) {
       setSyncError(e.message || "Update Failed");
+      setTools(oldTools); // Revert on failure
     } finally {
       setIsSyncing(false);
     }
   };
 
   const addTool = async (newTool: Tool) => {
+    const oldTools = [...tools];
     setTools(prev => [...prev, newTool]);
     setIsSyncing(true);
     try {
@@ -142,26 +147,32 @@ const App: React.FC = () => {
       setSyncError(null);
     } catch (e: any) {
       setSyncError(e.message || "Registration Failed");
+      setTools(oldTools); // Revert on failure
     } finally {
       setIsSyncing(false);
     }
   };
 
   const bulkAddTools = async (newToolsList: Tool[]) => {
-    const updatedTools = [...tools, ...newToolsList];
-    setTools(updatedTools);
+    const oldTools = [...tools];
+    const updatedToolsList = [...tools, ...newToolsList];
     setIsSyncing(true);
     try {
-      await syncTools(updatedTools);
+      // Try to sync to DB first
+      await syncTools(updatedToolsList);
+      // Only update local UI if DB sync succeeds
+      setTools(updatedToolsList);
       setSyncError(null);
     } catch (e: any) {
       setSyncError(`Bulk Sync Error: ${e.message}`);
+      // If DB fails, tools stay as oldTools locally
     } finally {
       setIsSyncing(false);
     }
   };
   
   const updateUser = async (updatedUser: User) => {
+    const oldUsers = [...allUsers];
     setAllUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
     if (currentUser?.id === updatedUser.id) setCurrentUser(updatedUser);
     setIsSyncing(true);
@@ -170,6 +181,7 @@ const App: React.FC = () => {
       setSyncError(null);
     } catch (e: any) {
       setSyncError(e.message || "Personnel Update Failed");
+      setAllUsers(oldUsers);
     } finally {
       setIsSyncing(false);
     }
@@ -305,6 +317,7 @@ const LoginScreen: React.FC<{
     const lastEmail = localStorage.getItem('et_last_email');
     if (lastEmail && users.length > 0) {
       const foundUser = users.find(u => u.email.toLowerCase() === lastEmail.toLowerCase());
+      // Only show bio login if they explicitly enabled it and we recognize the account
       if (foundUser && localStorage.getItem(`bio_enabled_${foundUser.id}`) === 'true') {
         setBioUser(foundUser);
       }
@@ -323,7 +336,7 @@ const LoginScreen: React.FC<{
 
   const handleBioLogin = () => {
     if (!bioUser) return;
-    // Emulate biometric success (FaceID/TouchID prompt logic would go here)
+    // Emulate biometric success
     onLogin(bioUser, true);
   };
 
@@ -357,7 +370,7 @@ const LoginScreen: React.FC<{
                  onClick={handleBioLogin}
                  className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all flex items-center justify-center gap-3"
                >
-                 <Fingerprint size={20} /> Use Biometrics
+                 <Fingerprint size={20} /> Use FaceID / TouchID
                </button>
                <button 
                  onClick={() => {
@@ -443,7 +456,7 @@ const ResetPasswordModal: React.FC<{ onClose: () => void; onReset: (email: strin
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-neda-navy/60 backdrop-blur-sm p-4 animate-in fade-in">
-      <div className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 space-y-6 shadow-2xl animate-in zoom-in-95">
+      <div className="bg-white w-full max-sm rounded-[2.5rem] p-8 space-y-6 shadow-2xl animate-in zoom-in-95">
         <div className="flex justify-between items-center">
           <h3 className="text-xl font-black text-neda-navy uppercase">Reset Password</h3>
           <button onClick={onClose} className="p-2 bg-slate-50 rounded-xl"><X size={18} /></button>
@@ -479,7 +492,6 @@ const ResetPasswordModal: React.FC<{ onClose: () => void; onReset: (email: strin
   );
 };
 
-// --- Inventory View ---
 const InventoryView: React.FC<{
   tools: Tool[]; allTools: Tool[]; searchTerm: string; setSearchTerm: (s: string) => void;
   statusFilter: ToolStatus | 'ALL'; setStatusFilter: (s: ToolStatus | 'ALL') => void;
@@ -526,7 +538,6 @@ const InventoryView: React.FC<{
   );
 };
 
-// --- My Tools View ---
 const MyToolsView: React.FC<{ tools: Tool[]; currentUser: User; onUpdateTool: (t: Tool) => Promise<void> }> = ({ tools, currentUser, onUpdateTool }) => {
   const [selectedTool, setSelectedTool] = useState<Tool | null>(null);
   return (
@@ -551,7 +562,110 @@ const MyToolsView: React.FC<{ tools: Tool[]; currentUser: User; onUpdateTool: (t
   );
 };
 
-// --- Admin Dashboard ---
+// --- Fixes for missing components: AddUserModal and EditUserModal ---
+
+const AddUserModal: React.FC<{ onClose: () => void; onAdd: (u: User) => Promise<void> }> = ({ onClose, onAdd }) => {
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [role, setRole] = useState<UserRole>(UserRole.USER);
+  const [password, setPassword] = useState('Neda123!');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      await onAdd({
+        id: 'U' + Math.random().toString(36).substr(2, 5).toUpperCase(),
+        name,
+        email,
+        role,
+        password,
+        isEnabled: true
+      });
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-neda-navy/60 backdrop-blur-sm p-4 animate-in fade-in">
+      <form onSubmit={handleSubmit} className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 space-y-5 shadow-2xl scale-in-95 animate-in">
+        <div className="flex justify-between items-center">
+          <h2 className="text-xl font-black text-neda-navy uppercase tracking-tight">Register User</h2>
+          <button type="button" onClick={onClose} className="p-2 bg-slate-50 rounded-xl"><X size={18} /></button>
+        </div>
+        <div className="space-y-4">
+          <input type="text" placeholder="Full Name" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold outline-none" value={name} onChange={e => setName(e.target.value)} required />
+          <input type="email" placeholder="Email Address" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold outline-none" value={email} onChange={e => setEmail(e.target.value)} required />
+          <select className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-xs font-black uppercase" value={role} onChange={e => setRole(e.target.value as UserRole)}>
+             <option value={UserRole.USER}>User</option>
+             <option value={UserRole.MANAGER}>Manager</option>
+             <option value={UserRole.ADMIN}>Admin</option>
+          </select>
+          <input type="text" placeholder="Initial Password" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold outline-none" value={password} onChange={e => setPassword(e.target.value)} required />
+        </div>
+        <button type="submit" disabled={loading} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2">
+           {loading ? <Loader2 className="animate-spin" size={18} /> : "Create Account"}
+        </button>
+      </form>
+    </div>
+  );
+};
+
+const EditUserModal: React.FC<{ user: User; onClose: () => void; onUpdate: (u: User) => Promise<void> }> = ({ user, onClose, onUpdate }) => {
+  const [name, setName] = useState(user.name);
+  const [role, setRole] = useState<UserRole>(user.role);
+  const [password, setPassword] = useState(user.password || '');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      await onUpdate({ ...user, name, role, password });
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-neda-navy/60 backdrop-blur-sm p-4 animate-in fade-in">
+      <form onSubmit={handleSubmit} className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 space-y-5 shadow-2xl scale-in-95 animate-in">
+        <div className="flex justify-between items-center">
+          <h2 className="text-xl font-black text-neda-navy uppercase tracking-tight">Edit Personnel</h2>
+          <button type="button" onClick={onClose} className="p-2 bg-slate-50 rounded-xl"><X size={18} /></button>
+        </div>
+        <div className="space-y-4">
+          <div className="space-y-1">
+            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Name</label>
+            <input type="text" placeholder="Full Name" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold outline-none" value={name} onChange={e => setName(e.target.value)} required />
+          </div>
+          <div className="space-y-1">
+            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Access Level</label>
+            <select className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-xs font-black uppercase" value={role} onChange={e => setRole(e.target.value as UserRole)}>
+               <option value={UserRole.USER}>User</option>
+               <option value={UserRole.MANAGER}>Manager</option>
+               <option value={UserRole.ADMIN}>Admin</option>
+            </select>
+          </div>
+          <div className="space-y-1">
+            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Update Password</label>
+            <input type="text" placeholder="Password" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold outline-none" value={password} onChange={e => setPassword(e.target.value)} />
+          </div>
+        </div>
+        <button type="submit" disabled={loading} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2">
+           {loading ? <Loader2 className="animate-spin" size={18} /> : "Update Personnel"}
+        </button>
+      </form>
+    </div>
+  );
+};
+
 const AdminDashboard: React.FC<{ 
   tools: Tool[]; allUsers: User[]; currentUser: User; 
   onUpdateUser: (u: User) => Promise<void>; onAddUser: (u: User) => Promise<void>; 
@@ -693,116 +807,6 @@ const AdminDashboard: React.FC<{
   );
 };
 
-// --- Modals ---
-const AddUserModal: React.FC<{ onClose: () => void; onAdd: (u: User) => Promise<void> }> = ({ onClose, onAdd }) => {
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('Builda123'); 
-  const [role, setRole] = useState(UserRole.USER);
-  const [loading, setLoading] = useState(false);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    try {
-      await onAdd({ id: 'U' + Math.random().toString(36).substr(2, 5).toUpperCase(), name, email, role, password, isEnabled: true });
-    } catch (e) {
-    } finally {
-      setLoading(false);
-    }
-  };
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-neda-navy/60 backdrop-blur-sm p-4 animate-in fade-in">
-      <form onSubmit={handleSubmit} className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 space-y-5 shadow-2xl scale-in-95 animate-in">
-        <div className="flex justify-between items-center mb-2">
-          <h2 className="text-xl font-black text-neda-navy uppercase tracking-tight">New Personnel</h2>
-          <button type="button" onClick={onClose} className="p-2 bg-slate-50 rounded-xl"><X size={18} /></button>
-        </div>
-        <div className="space-y-4">
-          <div className="space-y-1">
-            <label className="text-[9px] font-black text-neda-navy/40 uppercase tracking-widest ml-1">Full Name</label>
-            <input type="text" placeholder="John Smith" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-2 focus:ring-neda-orange text-sm font-bold" value={name} onChange={e => setName(e.target.value)} required />
-          </div>
-          <div className="space-y-1">
-            <label className="text-[9px] font-black text-neda-navy/40 uppercase tracking-widest ml-1">Email</label>
-            <input type="email" placeholder="john@nedabuilda.com" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-2 focus:ring-neda-orange text-sm font-bold" value={email} onChange={e => setEmail(e.target.value)} required />
-          </div>
-          <div className="space-y-1">
-            <label className="text-[9px] font-black text-neda-navy/40 uppercase tracking-widest ml-1">Initial Password</label>
-            <input type="text" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-2 focus:ring-neda-orange text-sm font-mono font-bold" value={password} onChange={e => setPassword(e.target.value)} required />
-          </div>
-          <div className="space-y-1">
-            <label className="text-[9px] font-black text-neda-navy/40 uppercase tracking-widest ml-1">System Role</label>
-            <select className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-xs font-black uppercase outline-none" value={role} onChange={e => setRole(e.target.value as any)}>
-               <option value={UserRole.USER}>Field Worker</option>
-               <option value={UserRole.MANAGER}>Manager</option>
-               <option value={UserRole.ADMIN}>Administrator</option>
-            </select>
-          </div>
-        </div>
-        <button type="submit" disabled={loading} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2">
-          {loading ? <Loader2 className="animate-spin" size={18} /> : "Create Account"}
-        </button>
-      </form>
-    </div>
-  );
-};
-
-const EditUserModal: React.FC<{ user: User; onClose: () => void; onUpdate: (u: User) => Promise<void> }> = ({ user, onClose, onUpdate }) => {
-  const [name, setName] = useState(user.name);
-  const [email, setEmail] = useState(user.email);
-  const [password, setPassword] = useState(user.password || '');
-  const [role, setRole] = useState(user.role);
-  const [loading, setLoading] = useState(false);
-  
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    await onUpdate({ ...user, name, email, password, role });
-    setLoading(false);
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-neda-navy/60 backdrop-blur-sm p-4 animate-in fade-in">
-      <form onSubmit={handleSubmit} className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 space-y-5 shadow-2xl">
-        <div className="flex justify-between items-center mb-2">
-          <h2 className="text-xl font-black text-neda-navy uppercase tracking-tight">Edit Personnel</h2>
-          <button type="button" onClick={onClose} className="p-2 bg-slate-50 rounded-xl"><X size={18} /></button>
-        </div>
-        <div className="space-y-4">
-          <div className="space-y-1">
-            <label className="text-[9px] font-black text-neda-navy/40 uppercase tracking-widest ml-1">Name</label>
-            <input type="text" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold" value={name} onChange={e => setName(e.target.value)} required />
-          </div>
-          <div className="space-y-1">
-            <label className="text-[9px] font-black text-neda-navy/40 uppercase tracking-widest ml-1">Email</label>
-            <input type="email" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold" value={email} onChange={e => setEmail(e.target.value)} required />
-          </div>
-          <div className="space-y-1">
-            <label className="text-[9px] font-black text-neda-navy/40 uppercase tracking-widest ml-1">Modify Password</label>
-            <div className="relative">
-              <input type="text" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-mono font-bold" value={password} onChange={e => setPassword(e.target.value)} required />
-              <Lock className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-200" size={14} />
-            </div>
-          </div>
-          <div className="space-y-1">
-            <label className="text-[9px] font-black text-neda-navy/40 uppercase tracking-widest ml-1">Role</label>
-            <select className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-xs font-black uppercase" value={role} onChange={e => setRole(e.target.value as any)}>
-               <option value={UserRole.USER}>Field Worker</option>
-               <option value={UserRole.MANAGER}>Manager</option>
-               <option value={UserRole.ADMIN}>Administrator</option>
-            </select>
-          </div>
-        </div>
-        <button type="submit" disabled={loading} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg flex items-center justify-center gap-2">
-           {loading ? <Loader2 className="animate-spin" size={18} /> : "Save Changes"}
-        </button>
-      </form>
-    </div>
-  );
-};
-
-// --- Components ---
 const StatCard: React.FC<{ label: string; value: number; color: string }> = ({ label, value, color }) => (
   <div className={`${color} p-6 rounded-[2rem] text-white relative overflow-hidden shadow-md`}>
     <p className="text-[9px] font-black uppercase tracking-widest opacity-60 leading-none">{label}</p>

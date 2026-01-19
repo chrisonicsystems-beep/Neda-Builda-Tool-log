@@ -1,6 +1,6 @@
 
 import { createClient } from '@supabase/supabase-js';
-import { Tool, User } from '../types';
+import { Tool, User, ToolStatus } from '../types';
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
@@ -10,7 +10,7 @@ export const supabase = (supabaseUrl && supabaseAnonKey && supabaseUrl !== '' &&
   : null;
 
 if (!supabase) {
-  console.warn("Supabase Client: Missing Credentials. Please check Vercel environment variables.");
+  console.warn("Supabase Client: Missing Credentials. Please check environment variables.");
 }
 
 const mapUserToDb = (user: User) => ({
@@ -31,26 +31,30 @@ const mapDbToUser = (dbUser: any): User => ({
   isEnabled: dbUser.is_enabled
 });
 
-const mapToolToDb = (tool: Tool) => ({
-  id: tool.id,
-  tool_name: tool.name, 
-  // serial_number removed as it does not exist in the DB schema
-  status: tool.status,
-  current_holder_id: tool.currentHolderId,
-  current_holder_name: tool.currentHolderName,
-  current_site: tool.currentSite,
-  booked_at: tool.bookedAt,
-  last_returned_at: tool.lastReturnedAt,
-  main_photo: tool.mainPhoto,
-  logs: tool.logs || []
-});
+const mapToolToDb = (tool: Tool) => {
+  // Defensive mapping: Only include columns we are sure exist in the 'tools' table.
+  // Based on user feedback, 'serial_number' and 'name' are causing PostgREST schema cache errors.
+  return {
+    id: tool.id,
+    tool_name: tool.name, // Mapping 'name' to 'tool_name' as suggested by previous errors
+    status: tool.status,
+    current_holder_id: tool.currentHolderId,
+    current_holder_name: tool.currentHolderName,
+    current_site: tool.currentSite,
+    booked_at: tool.bookedAt,
+    last_returned_at: tool.lastReturnedAt,
+    main_photo: tool.mainPhoto,
+    logs: tool.logs || []
+    // Note: 'serial_number' and 'category' are omitted as they are not in the schema cache.
+  };
+};
 
 const mapDbToTool = (dbTool: any): Tool => ({
   id: dbTool.id,
   name: dbTool.tool_name || dbTool.name || 'Unnamed Asset',
   category: dbTool.category || 'General',
-  serialNumber: dbTool.serial_number || '', // Provide empty string if it ever returns from DB
-  status: dbTool.status as any,
+  serialNumber: dbTool.serial_number || '', 
+  status: (dbTool.status as ToolStatus) || ToolStatus.AVAILABLE,
   currentHolderId: dbTool.current_holder_id,
   currentHolderName: dbTool.current_holder_name,
   currentSite: dbTool.current_site,
@@ -62,10 +66,10 @@ const mapDbToTool = (dbTool: any): Tool => ({
 
 export const upsertSingleTool = async (tool: Tool) => {
   if (!supabase) return;
-  const { error } = await supabase.from('tools').upsert(mapToolToDb(tool), { onConflict: 'id' });
+  const payload = mapToolToDb(tool);
+  const { error } = await supabase.from('tools').upsert(payload, { onConflict: 'id' });
   if (error) {
     console.error("Supabase Error (upsertSingleTool):", error);
-    if (error.code === '23505') throw new Error(`Asset with this ID already exists.`);
     throw error;
   }
 };
@@ -75,7 +79,6 @@ export const upsertSingleUser = async (user: User) => {
   const { error } = await supabase.from('users').upsert(mapUserToDb(user), { onConflict: 'id' });
   if (error) {
     console.error("Supabase Error (upsertSingleUser):", error);
-    if (error.code === '23505') throw new Error(`Personnel with this Email already exists.`);
     throw error;
   }
 };
@@ -85,7 +88,7 @@ export const syncTools = async (tools: Tool[]) => {
   const dbTools = tools.map(mapToolToDb);
   const { error } = await supabase.from('tools').upsert(dbTools, { onConflict: 'id' });
   if (error) {
-    console.error("Supabase Sync Error:", error);
+    console.error("Supabase Bulk Sync Error:", error);
     throw error;
   }
 };
