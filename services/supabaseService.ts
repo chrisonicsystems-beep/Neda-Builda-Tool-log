@@ -1,3 +1,4 @@
+
 import { createClient } from '@supabase/supabase-js';
 import { Tool, User, ToolStatus } from '../types';
 
@@ -53,7 +54,9 @@ const mapToolToDb = (tool: Tool) => {
     notes: (tool.notes === undefined || tool.notes === null) ? '' : String(tool.notes),
     date_of_purchase: tool.dateOfPurchase || null,
     number_of_items: tool.numberOfItems || 1,
-    serial_number: tool.serialNumber || ''
+    serial_number: tool.serialNumber || '',
+    booked_at: tool.bookedAt || null,
+    last_returned_at: tool.lastReturnedAt || null
   };
 };
 

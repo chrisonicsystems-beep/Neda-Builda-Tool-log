@@ -28,7 +28,9 @@ import {
   ArrowUpRight,
   Send,
   AlertCircle,
-  Scan
+  Scan,
+  CheckCircle,
+  FileSpreadsheet
 } from 'lucide-react';
 import { analyzeTools, searchAddresses } from './services/geminiService';
 import { fetchTools, fetchUsers, syncTools, syncUsers, upsertSingleTool, upsertSingleUser, supabase } from './services/supabaseService';
@@ -41,6 +43,7 @@ const App: React.FC = () => {
   const [isInitializing, setIsInitializing] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncSuccess, setSyncSuccess] = useState<string | null>(null);
   
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<ToolStatus | 'ALL'>('ALL');
@@ -105,12 +108,9 @@ const App: React.FC = () => {
   const handleEnrollBiometrics = async () => {
     if (!currentUser) return;
     try {
-      // In a real WebAuthn flow, we would get a challenge from the server.
-      // Here we simulate the enrollment success.
       const enrollmentKey = `biometric_enrolled_${currentUser.email}`;
       localStorage.setItem(enrollmentKey, 'true');
       setShowBiometricEnrollment(false);
-      // Optional: Store a success notification
     } catch (err) {
       console.error("Enrollment failed", err);
     }
@@ -132,12 +132,19 @@ const App: React.FC = () => {
   };
 
   const bulkAddTools = async (newToolsList: Tool[]) => {
-    const updatedToolsList = [...tools, ...newToolsList];
     setIsSyncing(true);
     try {
-      await syncTools(updatedToolsList);
-      setTools(updatedToolsList);
+      // For bulk sync, we merge existing and new (by ID) or replace.
+      // Usually a bulk upload replaces or upserts the items in the file.
+      await syncTools(newToolsList);
+      
+      // Refresh local state
+      const freshTools = await fetchTools();
+      if (freshTools) setTools(freshTools);
+      
+      setSyncSuccess(`Successfully imported ${newToolsList.length} assets.`);
       setSyncError(null);
+      setTimeout(() => setSyncSuccess(null), 5000);
     } catch (e: any) {
       setSyncError(`Bulk Sync Error: ${e.message}`);
     } finally {
@@ -188,17 +195,24 @@ const App: React.FC = () => {
 
   return (
     <Layout activeView={view} setView={setView} userRole={currentUser.role} onLogout={handleLogout}>
-      <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[100] w-full max-w-xs px-4 pointer-events-none">
+      <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[100] w-full max-w-xs px-4 pointer-events-none">
         {isSyncing && (
-          <div className="bg-neda-navy text-white px-4 py-2 rounded-2xl shadow-lg flex items-center justify-center gap-2 animate-in slide-in-from-top-4">
-            <Loader2 className="animate-spin" size={12} />
-            <span className="text-[8px] font-black uppercase tracking-widest">Syncing Cloud...</span>
+          <div className="bg-neda-navy text-white px-4 py-3 rounded-2xl shadow-lg flex items-center justify-center gap-3 animate-in slide-in-from-top-4">
+            <Loader2 className="animate-spin" size={16} />
+            <span className="text-[10px] font-black uppercase tracking-widest">Processing Assets...</span>
+          </div>
+        )}
+        {syncSuccess && (
+          <div className="bg-green-500 text-white px-4 py-3 rounded-2xl shadow-xl flex items-center gap-3 animate-in slide-in-from-top-4 pointer-events-auto">
+            <CheckCircle2 size={18} className="shrink-0" />
+            <span className="text-[10px] font-black uppercase tracking-widest flex-1">{syncSuccess}</span>
+            <button onClick={() => setSyncSuccess(null)} className="p-1 bg-white/20 rounded-lg"><X size={10} /></button>
           </div>
         )}
         {syncError && (
           <div className="bg-red-500 text-white px-4 py-3 rounded-2xl shadow-xl flex items-center gap-3 animate-in slide-in-from-top-4 pointer-events-auto">
-            <AlertTriangle size={16} className="shrink-0" />
-            <span className="text-[9px] font-black uppercase tracking-widest flex-1">{syncError}</span>
+            <AlertTriangle size={18} className="shrink-0" />
+            <span className="text-[10px] font-black uppercase tracking-widest flex-1">{syncError}</span>
             <button onClick={() => setSyncError(null)} className="p-1 bg-white/20 rounded-lg"><X size={10} /></button>
           </div>
         )}
@@ -300,7 +314,6 @@ const LoginScreen: React.FC<{
 
   const handleBiometricAuth = async () => {
     try {
-      // Simulate WebAuthn trigger
       const user = users.find(u => u.email.toLowerCase() === email.toLowerCase());
       if (user) {
         onLogin(user, true);
@@ -483,6 +496,18 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onAddUser, onBulkImpor
   const [activeTab, setActiveTab] = useState<'STOCK' | 'USERS'>('STOCK');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const downloadCSVTemplate = () => {
+    const headers = "id,equipment_tool,equipment_type,date_of_purchase,number_of_items,main_photo,current_holder_id,current_holder_name,current_site,status,notes,booked_at,last_returned_at,logs,serial_number";
+    const example = "T999,Hilti Hammer,Power Tools,2024-01-10,1,https://example.com/photo.jpg,U2,Gavin Builder,Auckland Site,BOOKED_OUT,Handle with care,1710000000000,,[],SN-12345";
+    const blob = new Blob([`${headers}\n${example}`], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'neda_tool_template.csv';
+    a.click();
+    window.URL.revokeObjectURL(url);
+  };
+
   const handleImport = (e: any) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -493,13 +518,37 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onAddUser, onBulkImpor
       const dataLines = lines.slice(1);
       
       const imported: Tool[] = dataLines.map(line => {
-        const parts = line.split(',');
-        const clean = (p: string) => p?.trim().replace(/^"|"$/g, '') || '';
+        // Robust CSV splitting to handle potentially quoted fields with commas
+        const regex = /(?:,|\n|^)(?:"([^"]*(?:""[^"]*)*)"|([^,\n]*))/g;
+        const parts: string[] = [];
+        let match;
+        while ((match = regex.exec(line)) !== null) {
+          parts.push(match[1] ? match[1].replace(/""/g, '"') : match[2]);
+        }
+        
+        const clean = (p: string) => p?.trim() || '';
+        
+        // Mapped CSV Columns:
+        // 0: id
+        // 1: equipment_tool
+        // 2: equipment_type
+        // 3: date_of_purchase
+        // 4: number_of_items
+        // 5: main_photo
+        // 6: current_holder_id
+        // 7: current_holder_name
+        // 8: current_site
+        // 9: status
+        // 10: notes
+        // 11: booked_at
+        // 12: last_returned_at
+        // 13: logs
+        // 14: serial_number
         
         const logsRaw = clean(parts[13]);
         let parsedLogs: ToolLog[] = [];
         try {
-          if (logsRaw) parsedLogs = JSON.parse(logsRaw);
+          if (logsRaw && logsRaw !== '[]' && logsRaw !== '') parsedLogs = JSON.parse(logsRaw);
         } catch (e) {
           console.warn("Could not parse logs for item", clean(parts[0]));
         }
@@ -529,45 +578,73 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onAddUser, onBulkImpor
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex gap-2 bg-slate-100 p-1 rounded-2xl">
+    <div className="space-y-6 pb-12">
+      <div className="flex gap-2 bg-slate-100 p-1.5 rounded-2xl">
         <button onClick={() => setActiveTab('STOCK')} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase transition-all ${activeTab === 'STOCK' ? 'bg-white shadow-sm' : 'text-slate-400'}`}>Stocktake</button>
         <button onClick={() => setActiveTab('USERS')} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase transition-all ${activeTab === 'USERS' ? 'bg-white shadow-sm' : 'text-slate-400'}`}>Personnel</button>
       </div>
 
       {activeTab === 'STOCK' ? (
-        <div className="space-y-4">
+        <div className="space-y-5">
           <div className="grid grid-cols-2 gap-3">
             <StatCard label="Assets" value={tools.length} color="bg-neda-navy" />
             <StatCard label="In Field" value={tools.filter((t: Tool) => t.status === ToolStatus.BOOKED_OUT).length} color="bg-neda-orange" />
           </div>
-          <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm space-y-4">
+          
+          <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm space-y-6">
             <div className="flex items-center justify-between">
-              <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Controls</h3>
-              <span className="text-[8px] font-bold text-slate-300">Format: 15-Column CSV</span>
+              <h3 className="text-[12px] font-black uppercase tracking-widest text-neda-navy flex items-center gap-2">
+                <FileSpreadsheet size={16} className="text-neda-orange" /> Bulk Operations
+              </h3>
+              <button 
+                onClick={downloadCSVTemplate}
+                className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5 hover:text-neda-navy transition-colors"
+              >
+                <Download size={12} /> Template
+              </button>
             </div>
-            <button onClick={() => fileInputRef.current?.click()} className="w-full py-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between px-6 group hover:border-neda-orange transition-all">
-              <div className="flex items-center gap-3">
-                <Upload size={18} className="text-neda-navy" />
-                <span className="text-xs font-black uppercase">Bulk Sync Assets</span>
-              </div>
-              <ArrowUpRight size={16} className="text-slate-300" />
-            </button>
-            <input type="file" ref={fileInputRef} className="hidden" accept=".csv" onChange={handleImport} />
+
+            <div className="space-y-3">
+              <button 
+                onClick={() => fileInputRef.current?.click()} 
+                className="w-full py-6 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between px-6 group hover:border-neda-orange transition-all"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-white rounded-xl border border-slate-100 group-hover:bg-neda-lightOrange transition-colors">
+                    <Upload size={18} className="text-neda-navy group-hover:text-neda-orange" />
+                  </div>
+                  <div className="text-left">
+                    <span className="block text-[11px] font-black uppercase tracking-tight">Sync CSV Manifest</span>
+                    <span className="block text-[8px] font-bold text-slate-400 uppercase mt-0.5">Automated asset registration</span>
+                  </div>
+                </div>
+                <ArrowUpRight size={16} className="text-slate-300 group-hover:text-neda-orange transition-colors" />
+              </button>
+              <input type="file" ref={fileInputRef} className="hidden" accept=".csv" onChange={handleImport} />
+            </div>
           </div>
         </div>
       ) : (
         <div className="space-y-3">
           {allUsers.map((u: User) => (
-            <div key={u.id} className="bg-white p-4 rounded-2xl border border-slate-100 flex justify-between items-center">
-              <div>
-                <p className="font-black text-neda-navy uppercase">{u.name}</p>
-                <p className="text-[9px] font-bold text-slate-300 uppercase">ID: {u.id}</p>
+            <div key={u.id} className="bg-white p-5 rounded-[1.5rem] border border-slate-100 flex justify-between items-center shadow-sm">
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center border border-slate-100">
+                  <UserIcon size={20} className="text-slate-300" />
+                </div>
+                <div>
+                  <p className="font-black text-neda-navy uppercase text-xs">{u.name}</p>
+                  <p className="text-[9px] font-bold text-slate-300 uppercase">ID: {u.id}</p>
+                </div>
               </div>
-              <span className="text-[9px] font-black uppercase px-2 py-1 bg-slate-50 rounded-lg">{u.role}</span>
+              <span className={`text-[8px] font-black uppercase px-2.5 py-1 rounded-lg ${u.role === UserRole.ADMIN ? 'bg-neda-navy text-white' : 'bg-slate-50 text-slate-400'}`}>
+                {u.role}
+              </span>
             </div>
           ))}
-          <button className="w-full py-4 border-2 border-dashed border-slate-200 rounded-2xl text-[10px] font-black uppercase text-slate-300">Register New Person</button>
+          <button className="w-full py-5 border-2 border-dashed border-slate-200 rounded-[1.5rem] text-[10px] font-black uppercase text-slate-300 flex items-center justify-center gap-2 mt-4 hover:border-neda-orange hover:text-neda-orange transition-all">
+            <UserPlus size={16} /> Register New Person
+          </button>
         </div>
       )}
     </div>
@@ -615,7 +692,10 @@ const ToolModal: React.FC<any> = ({ tool, onClose, currentUser, onUpdate }) => {
     <div className="fixed inset-0 z-[150] bg-neda-navy/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in">
       <div className="bg-white w-full max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 shadow-2xl animate-in slide-in-from-bottom-10 overflow-visible">
         <div className="flex justify-between items-start mb-6">
-          <h2 className="text-xl font-black text-neda-navy uppercase">{tool.name}</h2>
+          <div>
+            <h2 className="text-xl font-black text-neda-navy uppercase">{tool.name}</h2>
+            <p className="text-[9px] font-bold text-slate-300 uppercase tracking-widest mt-0.5">{tool.id} • {tool.category}</p>
+          </div>
           <button onClick={onClose} className="p-2 bg-slate-50 rounded-xl transition-colors hover:bg-slate-100"><X size={20} /></button>
         </div>
         
@@ -650,12 +730,14 @@ const ToolModal: React.FC<any> = ({ tool, onClose, currentUser, onUpdate }) => {
             )}
           </div>
 
-          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-             <div className="flex items-center gap-3">
-                <UserIcon size={16} className="text-neda-orange" />
+          <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100">
+             <div className="flex items-center gap-4">
+                <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center border border-slate-100">
+                   <UserIcon size={18} className="text-neda-orange" />
+                </div>
                 <div>
-                  <p className="text-[8px] font-black text-slate-300 uppercase tracking-widest">Logging to Holder</p>
-                  <p className="text-xs font-black text-neda-navy uppercase">{currentUser.name}</p>
+                  <p className="text-[8px] font-black text-slate-300 uppercase tracking-[0.2em]">Logging Deployment</p>
+                  <p className="text-xs font-black text-neda-navy uppercase mt-0.5">{currentUser.name}</p>
                 </div>
              </div>
           </div>
@@ -663,7 +745,7 @@ const ToolModal: React.FC<any> = ({ tool, onClose, currentUser, onUpdate }) => {
           <button 
             onClick={handleAssign} 
             disabled={!site.trim()}
-            className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-[0.98] transition-all disabled:opacity-30"
+            className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-[0.98] transition-all disabled:opacity-30 disabled:bg-slate-200"
           >
             Confirm Deployment
           </button>
@@ -675,7 +757,7 @@ const ToolModal: React.FC<any> = ({ tool, onClose, currentUser, onUpdate }) => {
 
 const StatCard: React.FC<any> = ({ label, value, color }) => (
   <div className={`${color} p-6 rounded-[2rem] text-white shadow-md relative overflow-hidden`}>
-    <p className="text-[9px] font-black uppercase opacity-60">{label}</p>
+    <p className="text-[9px] font-black uppercase opacity-60 tracking-[0.2em]">{label}</p>
     <p className="text-3xl font-black mt-1">{value}</p>
     <div className="absolute -bottom-4 -right-4 w-16 h-16 bg-white opacity-10 rounded-full blur-xl"></div>
   </div>
@@ -696,6 +778,7 @@ const AIAssistant: React.FC<any> = ({ tools }) => {
   const [loading, setLoading] = useState(false);
 
   const handleAsk = async () => {
+    if (!query.trim()) return;
     setLoading(true);
     const res = await analyzeTools(tools, query);
     setReply(res);
@@ -710,17 +793,22 @@ const AIAssistant: React.FC<any> = ({ tools }) => {
         </h2>
         <div className="mt-6 flex gap-2">
           <input 
-            placeholder="Ask anything..." 
-            className="flex-1 p-4 bg-slate-50 rounded-2xl font-bold text-xs outline-none"
+            placeholder="Search assets, sites, or status..." 
+            className="flex-1 p-4 bg-slate-50 rounded-2xl font-bold text-xs outline-none focus:ring-2 focus:ring-neda-orange/10 transition-all"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            onKeyPress={(e) => e.key === 'Enter' && handleAsk()}
           />
-          <button onClick={handleAsk} className="p-4 bg-neda-navy text-white rounded-2xl">
+          <button 
+            onClick={handleAsk} 
+            disabled={loading}
+            className="p-4 bg-neda-navy text-white rounded-2xl active:scale-95 transition-all disabled:opacity-50"
+          >
             {loading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
           </button>
         </div>
         {reply && (
-          <div className="mt-4 p-5 bg-slate-50 rounded-2xl text-[11px] font-bold text-slate-700 leading-relaxed border border-blue-50">
+          <div className="mt-4 p-5 bg-slate-50 rounded-2xl text-[11px] font-bold text-slate-700 leading-relaxed border border-blue-50 animate-in fade-in slide-in-from-top-2">
             {reply}
           </div>
         )}
