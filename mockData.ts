@@ -1,4 +1,3 @@
-
 import { Tool, ToolStatus, User, UserRole } from './types';
 
 export const INITIAL_USERS: User[] = [

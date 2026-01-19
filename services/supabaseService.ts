@@ -1,4 +1,3 @@
-
 import { createClient } from '@supabase/supabase-js';
 import { Tool, User, ToolStatus } from '../types';
 
@@ -10,12 +9,9 @@ export const supabase = (supabaseUrl && supabaseAnonKey && supabaseUrl !== '' &&
   : null;
 
 if (!supabase) {
-  console.warn("Supabase Client: Missing Credentials. Please check environment variables.");
+  console.warn("Supabase Client: Missing Credentials.");
 }
 
-/**
- * For Users, we still clean payload because the schema is more standard.
- */
 const cleanPayload = (obj: any) => {
   return Object.fromEntries(
     Object.entries(obj).filter(([_, v]) => v !== undefined && v !== null)
@@ -41,21 +37,20 @@ const mapDbToUser = (dbUser: any): User => ({
 });
 
 /**
- * CRITICAL: For Tools, we DO NOT use cleanPayload.
- * We must explicitly send every column to avoid "NULL VALUE" errors 
- * when an upsert omits a NOT NULL column that doesn't have a default value in DB.
+ * mapToolToDb: Converts frontend Tool object to Database format.
+ * Includes absolute safety defaults for NOT NULL columns.
  */
 const mapToolToDb = (tool: Tool) => {
   return {
     id: tool.id,
-    equipment_tool: tool.name || '',
+    equipment_tool: tool.name || 'Unnamed Asset',
     equipment_type: tool.category || 'General',
     status: tool.status || ToolStatus.AVAILABLE,
     current_holder_id: tool.currentHolderId || null,
     current_holder_name: tool.currentHolderName || null,
     current_site: tool.currentSite || null,
     main_photo: tool.mainPhoto || null,
-    notes: tool.notes || '', // Ensure this is NEVER null or undefined
+    notes: (tool.notes === undefined || tool.notes === null) ? '' : String(tool.notes),
     date_of_purchase: tool.dateOfPurchase || null,
     number_of_items: tool.numberOfItems || 1,
     serial_number: tool.serialNumber || ''
@@ -82,25 +77,18 @@ const mapDbToTool = (dbTool: any): Tool => ({
 
 export const upsertSingleTool = async (tool: Tool) => {
   if (!supabase) return;
-  const payload = mapToolToDb(tool);
-  const { error } = await supabase.from('tools').upsert(payload, { onConflict: 'id' });
-  if (error) {
-    console.error("Supabase Error (upsertSingleTool):", error);
-    throw error;
-  }
+  const { error } = await supabase.from('tools').upsert(mapToolToDb(tool), { onConflict: 'id' });
+  if (error) throw error;
 };
 
 export const upsertSingleUser = async (user: User) => {
   if (!supabase) return;
   const { error } = await supabase.from('users').upsert(mapUserToDb(user), { onConflict: 'id' });
-  if (error) {
-    console.error("Supabase Error (upsertSingleUser):", error);
-    throw error;
-  }
+  if (error) throw error;
 };
 
 export const syncTools = async (tools: Tool[]) => {
-  if (!supabase) return;
+  if (!supabase || tools.length === 0) return;
   const dbTools = tools.map(mapToolToDb);
   const { error } = await supabase.from('tools').upsert(dbTools, { onConflict: 'id' });
   if (error) {
@@ -112,27 +100,19 @@ export const syncTools = async (tools: Tool[]) => {
 export const fetchTools = async (): Promise<Tool[] | null> => {
   if (!supabase) return null;
   const { data, error } = await supabase.from('tools').select('*');
-  if (error) {
-    console.error('Error fetching tools:', error);
-    return null;
-  }
+  if (error) return null;
   return data.map(mapDbToTool);
 };
 
 export const syncUsers = async (users: User[]) => {
   if (!supabase) return;
-  const dbUsers = users.map(mapUserToDb);
-  const { error } = await supabase.from('users').upsert(dbUsers, { onConflict: 'id' });
+  const { error } = await supabase.from('users').upsert(users.map(mapUserToDb), { onConflict: 'id' });
   if (error) throw error;
 };
 
 export const fetchUsers = async (): Promise<User[] | null> => {
   if (!supabase) return null;
-  // Fixed: Querying 'users' table instead of 'tools'
   const { data, error } = await supabase.from('users').select('*');
-  if (error) {
-    console.error('Error fetching users:', error);
-    return null;
-  }
-  return data.map(mapDbToUser);
+  if (error) return null;
+  return data.map(dbUser => mapDbToUser(dbUser));
 };

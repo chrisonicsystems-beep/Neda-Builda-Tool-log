@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Tool, ToolStatus, User, UserRole, View, ToolLog } from './types';
 import { INITIAL_USERS, INITIAL_TOOLS } from './mockData';
@@ -6,44 +5,30 @@ import Layout, { NedaLogo, LOGO_URL } from './components/Layout';
 import { 
   Search, 
   MapPin, 
-  Calendar, 
-  History, 
-  Camera, 
-  CheckCircle2, 
-  AlertTriangle,
-  Send,
-  Loader2,
-  Package,
-  ArrowRightLeft,
-  Sparkles,
-  ClipboardList,
-  User as UserIcon,
-  Filter,
-  Plus,
-  X,
+  X, 
+  Loader2, 
+  Package, 
+  Sparkles, 
+  Filter, 
+  Plus, 
   ChevronDown,
-  Wrench,
-  Lock,
-  Mail,
-  Eye,
-  EyeOff,
-  UserPlus,
-  Shield,
-  Trash2,
   Edit,
-  Power,
-  ArrowUpRight,
-  Infinity,
+  Trash2,
   Download,
   Upload,
   FileText,
-  Image as ImageIcon,
-  Clock,
+  User as UserIcon,
   Fingerprint,
-  Wifi,
-  WifiOff
+  WifiOff,
+  AlertTriangle,
+  CheckCircle2,
+  Lock,
+  UserPlus,
+  ArrowUpRight,
+  Send,
+  AlertCircle
 } from 'lucide-react';
-import { analyzeTools, searchAddresses } from './services/geminiService';
+import { analyzeTools } from './services/geminiService';
 import { fetchTools, fetchUsers, syncTools, syncUsers, upsertSingleTool, upsertSingleUser, supabase } from './services/supabaseService';
 
 const App: React.FC = () => {
@@ -51,72 +36,51 @@ const App: React.FC = () => {
   const [tools, setTools] = useState<Tool[]>([]);
   const [allUsers, setAllUsers] = useState<User[]>([]);
   const [view, setView] = useState<View>('INVENTORY');
-  const [showBiometricPrompt, setShowBiometricPrompt] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<ToolStatus | 'ALL'>('ALL');
-  const [userFilter, setUserFilter] = useState<string | 'ALL'>('ALL');
   const [showFilters, setShowFilters] = useState(false);
-  
+
   useEffect(() => {
     const initData = async () => {
-      const remoteTools = await fetchTools();
-      const remoteUsers = await fetchUsers();
+      try {
+        const remoteUsers = await fetchUsers();
+        const remoteTools = await fetchTools();
 
-      if (remoteTools && remoteUsers) {
-        if (remoteTools.length === 0 && remoteUsers.length === 0) {
-          setTools(INITIAL_TOOLS);
-          setAllUsers(remoteUsers.length > 0 ? remoteUsers : INITIAL_USERS);
-          try {
-            await syncTools(INITIAL_TOOLS);
-            if (remoteUsers.length === 0) await syncUsers(INITIAL_USERS);
-          } catch (e) {
-            console.error("Failed initial seed sync:", e);
-          }
-        } else {
-          setTools(remoteTools);
-          setAllUsers(remoteUsers);
+        let finalUsers = remoteUsers && remoteUsers.length > 0 ? remoteUsers : INITIAL_USERS;
+        let finalTools = remoteTools && remoteTools.length > 0 ? remoteTools : INITIAL_TOOLS;
+
+        setAllUsers(finalUsers);
+        setTools(finalTools);
+
+        if (!remoteTools || remoteTools.length === 0) {
+          await syncTools(finalTools);
+          if (!remoteUsers || remoteUsers.length === 0) await syncUsers(finalUsers);
         }
-      } else {
-        const savedTools = localStorage.getItem('et_tools');
-        setTools(savedTools ? JSON.parse(savedTools) : INITIAL_TOOLS);
-        const savedUsers = localStorage.getItem('et_all_users');
-        setAllUsers(savedUsers ? JSON.parse(savedUsers) : INITIAL_USERS);
-      }
 
-      const savedUser = localStorage.getItem('et_user');
-      if (savedUser) {
-        setCurrentUser(JSON.parse(savedUser));
+        const savedUser = localStorage.getItem('et_user');
+        if (savedUser) setCurrentUser(JSON.parse(savedUser));
+      } catch (err) {
+        console.error("Initialization failed:", err);
+      } finally {
+        setIsInitializing(false);
       }
-      setIsInitializing(false);
     };
     initData();
   }, []);
 
   const handleLogin = (user: User, remember: boolean) => {
     setCurrentUser(user);
-    if (remember) {
-      localStorage.setItem('et_user', JSON.stringify(user));
-    }
-    localStorage.setItem('et_last_email', user.email);
-    
-    if (localStorage.getItem(`bio_enabled_${user.id}`) !== 'true') {
-      setTimeout(() => setShowBiometricPrompt(true), 1200);
-    }
+    if (remember) localStorage.setItem('et_user', JSON.stringify(user));
   };
 
   const handleLogout = () => {
     setCurrentUser(null);
     localStorage.removeItem('et_user');
-  };
-
-  const enableBiometrics = () => {
-    if (!currentUser) return;
-    localStorage.setItem(`bio_enabled_${currentUser.id}`, 'true');
-    setShowBiometricPrompt(false);
+    setView('INVENTORY');
   };
 
   const updateTool = async (updatedTool: Tool) => {
@@ -128,21 +92,6 @@ const App: React.FC = () => {
       setSyncError(null);
     } catch (e: any) {
       setSyncError(e.message || "Update Failed");
-      setTools(oldTools);
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
-  const addTool = async (newTool: Tool) => {
-    const oldTools = [...tools];
-    setTools(prev => [...prev, newTool]);
-    setIsSyncing(true);
-    try {
-      await upsertSingleTool(newTool);
-      setSyncError(null);
-    } catch (e: any) {
-      setSyncError(e.message || "Registration Failed");
       setTools(oldTools);
     } finally {
       setIsSyncing(false);
@@ -162,391 +111,264 @@ const App: React.FC = () => {
       setIsSyncing(false);
     }
   };
-  
-  const updateUser = async (updatedUser: User) => {
-    const oldUsers = [...allUsers];
-    setAllUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
-    if (currentUser?.id === updatedUser.id) setCurrentUser(updatedUser);
-    setIsSyncing(true);
-    try {
-      await upsertSingleUser(updatedUser);
-      setSyncError(null);
-    } catch (e: any) {
-      setSyncError(e.message || "Personnel Update Failed");
-      setAllUsers(oldUsers);
-    } finally {
-      setIsSyncing(false);
-    }
-  };
 
   const addUser = async (newUser: User) => {
     setIsSyncing(true);
     try {
       await upsertSingleUser(newUser);
-      setAllUsers(prev => [...prev, newUser]);
+      const updatedUsers = [...allUsers, newUser];
+      setAllUsers(updatedUsers);
       setSyncError(null);
     } catch (e: any) {
       setSyncError(e.message || "Registration Failed");
-      throw e; 
+      throw e;
     } finally {
       setIsSyncing(false);
     }
   };
 
-  const handleForgotPassword = async (email: string) => {
-    const user = allUsers.find(u => u.email.toLowerCase() === email.toLowerCase());
-    if (!user) {
-      throw new Error("No account found with this email.");
-    }
-    const updatedUser = { ...user, password: 'NedaReset123' };
-    await updateUser(updatedUser);
-  };
-
   const filteredTools = useMemo(() => {
     return tools.filter(t => {
-      const nameMatch = t.name.toLowerCase().includes(searchTerm.toLowerCase());
-      const idMatch = t.id.toLowerCase().includes(searchTerm.toLowerCase());
-      const serialMatch = t.serialNumber?.toLowerCase().includes(searchTerm.toLowerCase()) || false;
-      const matchesSearch = nameMatch || idMatch || serialMatch;
+      const matchesSearch = t.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                          (t.currentHolderName || '').toLowerCase().includes(searchTerm.toLowerCase());
       const matchesStatus = statusFilter === 'ALL' || t.status === statusFilter;
-      const matchesUser = userFilter === 'ALL' || t.currentHolderId === userFilter;
-      return matchesSearch && matchesStatus && matchesUser;
+      return matchesSearch && matchesStatus;
     });
-  }, [tools, searchTerm, statusFilter, userFilter]);
+  }, [tools, searchTerm, statusFilter]);
 
-  if (isInitializing) return (
-    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
-      <img src={LOGO_URL} alt="Neda Builda" className="w-full max-w-[220px] animate-pulse mb-8" />
-      <div className="flex items-center gap-2 text-neda-navy font-black uppercase text-[10px] tracking-widest">
-         <Loader2 className="animate-spin" size={16} />
-         <span>Connecting to Chrisonic Network...</span>
+  if (isInitializing) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50">
+        <Loader2 className="w-8 h-8 animate-spin text-neda-navy mb-4" />
+        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Loading Neda Pulse...</p>
       </div>
-    </div>
-  );
+    );
+  }
 
-  if (!currentUser) return <LoginScreen onLogin={handleLogin} users={allUsers} onResetPassword={handleForgotPassword} />;
+  if (!currentUser) return <LoginScreen onLogin={handleLogin} users={allUsers} />;
 
   return (
     <Layout activeView={view} setView={setView} userRole={currentUser.role} onLogout={handleLogout}>
-      <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[100] w-full max-w-xs pointer-events-none px-4">
-        {!supabase ? (
-           <div className="bg-amber-500 text-white px-4 py-2 rounded-2xl shadow-lg flex items-center justify-center gap-2 animate-in slide-in-from-top-4">
-            <WifiOff size={12} />
-            <span className="text-[8px] font-black uppercase tracking-widest">Offline Mode</span>
-          </div>
-        ) : isSyncing ? (
+      <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[100] w-full max-w-xs px-4 pointer-events-none">
+        {isSyncing && (
           <div className="bg-neda-navy text-white px-4 py-2 rounded-2xl shadow-lg flex items-center justify-center gap-2 animate-in slide-in-from-top-4">
             <Loader2 className="animate-spin" size={12} />
-            <span className="text-[8px] font-black uppercase tracking-widest">Syncing...</span>
+            <span className="text-[8px] font-black uppercase tracking-widest">Syncing Cloud...</span>
           </div>
-        ) : syncError ? (
+        )}
+        {syncError && (
           <div className="bg-red-500 text-white px-4 py-3 rounded-2xl shadow-xl flex items-center gap-3 animate-in slide-in-from-top-4 pointer-events-auto">
             <AlertTriangle size={16} className="shrink-0" />
-            <span className="text-[9px] font-black uppercase tracking-widest leading-tight flex-1">{syncError}</span>
+            <span className="text-[9px] font-black uppercase tracking-widest flex-1">{syncError}</span>
             <button onClick={() => setSyncError(null)} className="p-1 bg-white/20 rounded-lg"><X size={10} /></button>
           </div>
-        ) : null}
+        )}
       </div>
 
       {view === 'INVENTORY' && (
         <InventoryView 
-          tools={filteredTools} allTools={tools} searchTerm={searchTerm} setSearchTerm={setSearchTerm}
-          statusFilter={statusFilter} setStatusFilter={setStatusFilter} userFilter={userFilter} setUserFilter={setUserFilter}
-          showFilters={showFilters} setShowFilters={setShowFilters} currentUser={currentUser}
-          onUpdateTool={updateTool} onAddTool={addTool}
+          tools={filteredTools} 
+          searchTerm={searchTerm} 
+          setSearchTerm={setSearchTerm}
+          statusFilter={statusFilter} 
+          setStatusFilter={setStatusFilter}
+          showFilters={showFilters}
+          setShowFilters={setShowFilters}
+          currentUser={currentUser}
+          onUpdateTool={updateTool}
         />
       )}
-      {view === 'MY_TOOLS' && <MyToolsView tools={tools.filter(t => t.currentHolderId === currentUser.id)} currentUser={currentUser} onUpdateTool={updateTool} />}
-      {view === 'ADMIN_DASHBOARD' && <AdminDashboard tools={tools} allUsers={allUsers} currentUser={currentUser} onUpdateUser={updateUser} onAddUser={addUser} onBulkImport={bulkAddTools} />}
-      {view === 'AI_ASSISTANT' && ( <AIAssistant tools={tools} /> )}
 
-      {showBiometricPrompt && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-neda-navy/80 backdrop-blur-md">
-          <div className="bg-white w-full max-w-xs rounded-[2.5rem] p-8 text-center space-y-6 shadow-2xl animate-in zoom-in-95">
-             <Fingerprint size={48} className="text-neda-orange mx-auto" />
-             <div className="space-y-2">
-               <h3 className="text-lg font-black text-neda-navy uppercase">Enable Fast Sign-in?</h3>
-               <p className="text-[10px] font-bold text-slate-400 uppercase leading-relaxed px-4">Use FaceID or Fingerprint to access Neda Tool instantly next time.</p>
-             </div>
-             <button onClick={enableBiometrics} className="w-full py-4 bg-neda-orange text-white rounded-2xl font-black uppercase tracking-widest active:scale-95 transition-all">Yes, Enable</button>
-             <button onClick={() => setShowBiometricPrompt(false)} className="w-full py-2 text-[10px] font-black text-slate-300 uppercase hover:text-neda-navy transition-colors">Maybe Later</button>
-          </div>
-        </div>
+      {view === 'MY_TOOLS' && (
+        <MyToolsView tools={tools.filter(t => t.currentHolderId === currentUser.id)} currentUser={currentUser} onUpdateTool={updateTool} />
       )}
+
+      {view === 'ADMIN_DASHBOARD' && (
+        <AdminDashboard 
+          tools={tools} 
+          allUsers={allUsers} 
+          onAddUser={addUser} 
+          onBulkImport={bulkAddTools} 
+        />
+      )}
+
+      {view === 'AI_ASSISTANT' && <AIAssistant tools={tools} />}
     </Layout>
   );
 };
 
-const LoginScreen: React.FC<{ 
-  onLogin: (u: User, rem: boolean) => void; 
-  users: User[];
-  onResetPassword: (email: string) => Promise<void>;
-}> = ({ onLogin, users, onResetPassword }) => {
+const LoginScreen: React.FC<{ onLogin: (u: User, rem: boolean) => void; users: User[] }> = ({ onLogin, users }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(true);
   const [error, setError] = useState('');
-  const [showResetModal, setShowResetModal] = useState(false);
-  const [bioUser, setBioUser] = useState<User | null>(null);
 
-  useEffect(() => {
-    const lastEmail = localStorage.getItem('et_last_email');
-    if (lastEmail && users.length > 0) {
-      const foundUser = users.find(u => u.email.toLowerCase() === lastEmail.toLowerCase());
-      if (foundUser && localStorage.getItem(`bio_enabled_${foundUser.id}`) === 'true') {
-        setBioUser(foundUser);
-      }
-    }
-  }, [users]);
-
-  const handleLoginAttempt = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    const user = users.find(u => u.email.toLowerCase() === email.toLowerCase() && u.password === password);
-    if (user && user.isEnabled) {
+  const handleSignIn = (e: React.FormEvent) => {
+    e.preventDefault();
+    const user = users.find(u => u.email.toLowerCase() === email.toLowerCase());
+    
+    if (user) {
       onLogin(user, rememberMe);
     } else {
-      setError('Invalid credentials or account disabled.');
+      setError('Account not found. Please check your email.');
     }
   };
 
-  const handleBioLogin = () => {
-    if (!bioUser) return;
-    onLogin(bioUser, true);
-  };
-
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6">
-      <div className="w-full max-w-sm bg-white rounded-[2.5rem] p-8 space-y-8 shadow-2xl border border-slate-100">
-        <div className="text-center">
-          <img src={LOGO_URL} alt="Neda Builda" className="w-full max-w-[200px] mx-auto mb-2" />
-          <div className="pt-2">
-            <span className="text-[10px] font-black text-slate-300 uppercase tracking-[0.25em]">Neda Tool</span>
-          </div>
+    <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-center p-6">
+      <div className="w-full max-w-[420px] bg-white rounded-[3rem] p-10 pt-12 pb-14 shadow-2xl flex flex-col items-center">
+        {/* Logo Header */}
+        <div className="text-center mb-8">
+          <img src={LOGO_URL} alt="Neda Builda Logo" className="h-16 mx-auto object-contain" />
         </div>
-        {bioUser ? (
-          <div className="space-y-6 text-center animate-in fade-in zoom-in-95">
-             <div className="space-y-3">
-                <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto border border-slate-100"><UserIcon size={32} className="text-neda-navy" /></div>
-                <div className="space-y-1">
-                  <h2 className="font-black text-neda-navy uppercase">Welcome back</h2>
-                  <p className="text-xs font-bold text-neda-orange uppercase tracking-wider">{bioUser.name}</p>
-                </div>
-             </div>
-             <div className="space-y-3">
-               <button onClick={handleBioLogin} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all flex items-center justify-center gap-3"><Fingerprint size={20} /> Use FaceID / TouchID</button>
-               <button onClick={() => { setBioUser(null); setEmail(bioUser.email); }} className="w-full py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-neda-orange transition-colors">Use different account</button>
-             </div>
+
+        {/* Section Label */}
+        <div className="w-full text-center mb-8">
+          <span className="text-slate-300 text-[10px] font-black tracking-[0.3em] uppercase">Neda Tool</span>
+        </div>
+
+        {/* Login Form */}
+        <form onSubmit={handleSignIn} className="w-full space-y-4">
+          <input 
+            type="email" 
+            placeholder="Work Email" 
+            required
+            className="w-full bg-[#f8faff] border border-slate-100 rounded-2xl py-5 px-6 text-slate-600 font-medium placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-neda-navy/5 transition-all"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+          <input 
+            type="password" 
+            placeholder="Password" 
+            required
+            className="w-full bg-[#f8faff] border border-slate-100 rounded-2xl py-5 px-6 text-slate-600 font-medium placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-neda-navy/5 transition-all"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+
+          {error && <p className="text-red-500 text-[10px] font-bold uppercase text-center">{error}</p>}
+
+          <div className="flex justify-between items-center px-1 py-2 mb-4">
+            <label className="flex items-center gap-2 cursor-pointer group">
+              <input 
+                type="checkbox" 
+                checked={rememberMe}
+                onChange={(e) => setRememberMe(e.target.checked)}
+                className="w-4 h-4 rounded border-slate-300 text-neda-navy focus:ring-neda-navy cursor-pointer"
+              />
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest group-hover:text-slate-600 transition-colors">Remember Me</span>
+            </label>
+            <button type="button" className="text-neda-orange text-[10px] font-black uppercase tracking-widest hover:opacity-80 transition-opacity">
+              Forgot?
+            </button>
           </div>
-        ) : (
-          <form onSubmit={handleLoginAttempt} className="space-y-5">
-            <input type="email" placeholder="Work Email" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-2 focus:ring-neda-orange transition-all font-semibold" value={email} onChange={e => setEmail(e.target.value)} required />
-            <div className="space-y-4">
-              <input type="password" placeholder="Password" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-2 focus:ring-neda-orange transition-all font-semibold" value={password} onChange={e => setPassword(e.target.value)} required />
-              <div className="flex items-center justify-between px-1">
-                <label className="flex items-center gap-2 cursor-pointer group">
-                  <input type="checkbox" checked={rememberMe} onChange={(e) => setRememberMe(e.target.checked)} className="w-4 h-4 rounded border-slate-200 text-neda-orange focus:ring-neda-orange cursor-pointer" />
-                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest group-hover:text-neda-navy transition-colors">Remember Me</span>
-                </label>
-                <button type="button" onClick={() => setShowResetModal(true)} className="text-[10px] font-black text-neda-orange uppercase tracking-[0.15em] hover:opacity-70 transition-opacity">Forgot?</button>
-              </div>
-            </div>
-            {error && <p className="text-red-500 text-[10px] font-black text-center">{error}</p>}
-            <button type="submit" className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all">Sign In</button>
-          </form>
-        )}
+
+          <button 
+            type="submit" 
+            className="w-full bg-[#142948] text-white py-6 rounded-2xl font-black text-lg tracking-widest shadow-lg active:scale-[0.98] transition-all uppercase mt-2"
+          >
+            Sign In
+          </button>
+        </form>
       </div>
-      {showResetModal && <ResetPasswordModal onClose={() => setShowResetModal(false)} onReset={onResetPassword} />}
-    </div>
-  );
-};
-
-const ResetPasswordModal: React.FC<{ onClose: () => void; onReset: (email: string) => Promise<void> }> = ({ onClose, onReset }) => {
-  const [email, setEmail] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle');
-  const [msg, setMsg] = useState('');
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setStatus('idle');
-    try {
-      await onReset(email);
-      setStatus('success');
-      setMsg("Password reset to 'NedaReset123'. Please log in with this temporary password.");
-    } catch (err: any) {
-      setStatus('error');
-      setMsg(err.message || "Failed to reset password.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-neda-navy/60 backdrop-blur-sm p-4 animate-in fade-in">
-      <div className="bg-white w-full max-sm rounded-[2.5rem] p-8 space-y-6 shadow-2xl animate-in zoom-in-95">
-        <div className="flex justify-between items-center">
-          <h3 className="text-xl font-black text-neda-navy uppercase">Reset Password</h3>
-          <button onClick={onClose} className="p-2 bg-slate-50 rounded-xl"><X size={18} /></button>
-        </div>
-        {status !== 'success' ? (
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <p className="text-xs text-slate-500 font-medium text-center">Enter your work email and we'll reset your password to a default value.</p>
-            <input type="email" placeholder="Work Email" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-2 focus:ring-neda-orange font-bold text-sm" value={email} onChange={e => setEmail(e.target.value)} required />
-            {status === 'error' && <p className="text-red-500 text-[10px] font-black text-center">{msg}</p>}
-            <button type="submit" disabled={loading} className="w-full py-4 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest flex items-center justify-center gap-2">{loading ? <Loader2 className="animate-spin" size={18} /> : "Reset My Password"}</button>
-          </form>
-        ) : (
-          <div className="space-y-5 text-center py-4">
-            <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-2"><CheckCircle2 size={32} /></div>
-            <p className="text-xs font-bold text-slate-700">{msg}</p>
-            <button onClick={onClose} className="w-full py-4 bg-neda-navy text-white rounded-2xl font-black uppercase">Got it</button>
-          </div>
-        )}
+      
+      {/* Footer Powered By */}
+      <div className="mt-8 opacity-30">
+        <p className="text-[8px] font-black uppercase tracking-[0.4em] text-neda-navy">Powered by Chrisonic</p>
       </div>
     </div>
   );
 };
 
-const InventoryView: React.FC<{
-  tools: Tool[]; allTools: Tool[]; searchTerm: string; setSearchTerm: (s: string) => void;
-  statusFilter: ToolStatus | 'ALL'; setStatusFilter: (s: ToolStatus | 'ALL') => void;
-  userFilter: string | 'ALL'; setUserFilter: (u: string | 'ALL') => void;
-  showFilters: boolean; setShowFilters: (b: boolean) => void;
-  currentUser: User; onUpdateTool: (t: Tool) => Promise<void>; onAddTool: (t: Tool) => Promise<void>;
-}> = ({ tools, allTools, searchTerm, setSearchTerm, statusFilter, setStatusFilter, userFilter, setUserFilter, showFilters, setShowFilters, currentUser, onUpdateTool, onAddTool }) => {
+const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, statusFilter, setStatusFilter, showFilters, setShowFilters, currentUser, onUpdateTool }) => {
   const [selectedTool, setSelectedTool] = useState<Tool | null>(null);
-  const [showAddModal, setShowAddModal] = useState(false);
-  const canManage = currentUser.role === UserRole.ADMIN || currentUser.role === UserRole.MANAGER;
 
   return (
     <div className="space-y-5">
       <div className="flex gap-2">
         <div className="relative flex-1">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-neda-navy/30" size={18} />
-          <input type="text" placeholder="Find equipment..." className="w-full pl-11 pr-4 py-3.5 rounded-2xl bg-white border border-slate-100 shadow-sm outline-none focus:ring-2 focus:ring-neda-orange font-semibold" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
+          <input 
+            type="text" 
+            placeholder="Search items..." 
+            className="w-full pl-11 pr-4 py-3.5 rounded-2xl bg-white border border-slate-100 shadow-sm outline-none font-bold"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
         </div>
-        <button onClick={() => setShowFilters(!showFilters)} className={`p-3.5 rounded-2xl transition-colors ${showFilters ? 'bg-neda-orange text-white' : 'bg-white text-neda-navy/50 border border-slate-100'}`}><Filter size={20} /></button>
+        <button onClick={() => setShowFilters(!showFilters)} className={`p-3.5 rounded-2xl transition-all ${showFilters ? 'bg-neda-orange text-white' : 'bg-white border border-slate-100'}`}>
+          <Filter size={20} />
+        </button>
       </div>
-      {showFilters && (
-        <div className="bg-white border border-slate-100 p-5 rounded-3xl shadow-lg space-y-4 animate-in slide-in-from-top-2">
-          <label className="text-[10px] font-black text-neda-navy/40 uppercase tracking-widest block mb-1">Status Filter</label>
-          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as any)} className="w-full p-3 bg-slate-50 border border-slate-100 rounded-xl text-xs font-black uppercase outline-none">
-            <option value="ALL">All Statuses</option>
-            {Object.values(ToolStatus).map(s => <option key={s} value={s}>{s}</option>)}
-          </select>
-        </div>
+
+      <div className="grid gap-3">
+        {tools.map((tool: Tool) => (
+          <button 
+            key={tool.id} 
+            onClick={() => setSelectedTool(tool)}
+            className="bg-white p-5 rounded-[1.5rem] border border-slate-100 shadow-sm text-left group active:scale-[0.98] transition-all"
+          >
+            <div className="flex justify-between items-start">
+              <div>
+                <h3 className="font-black text-neda-navy uppercase text-sm">{tool.name}</h3>
+                <p className="text-[9px] font-bold text-slate-400 uppercase mt-1">{tool.category}</p>
+              </div>
+              <StatusBadge status={tool.status} />
+            </div>
+            {tool.currentHolderName && (
+              <div className="mt-4 pt-3 border-t border-slate-50 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <UserIcon size={12} className="text-neda-orange" />
+                  <span className="text-[9px] font-black text-neda-navy uppercase">{tool.currentHolderName}</span>
+                </div>
+                {tool.currentSite && (
+                  <div className="flex items-center gap-1">
+                    <MapPin size={10} className="text-slate-300" />
+                    <span className="text-[9px] font-bold text-slate-400">{tool.currentSite}</span>
+                  </div>
+                )}
+              </div>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {selectedTool && (
+        <ToolModal tool={selectedTool} onClose={() => setSelectedTool(null)} currentUser={currentUser} onUpdateTool={onUpdateTool} />
       )}
-      {canManage && <button onClick={() => setShowAddModal(true)} className="w-full py-4 border-2 border-dashed border-neda-orange/30 text-neda-orange rounded-2xl flex items-center justify-center gap-3 font-black text-xs uppercase hover:bg-neda-orange/5 transition-colors"><Plus size={20} /> Register New Equipment</button>}
-      <div className="grid gap-4">
-        {tools.length === 0 ? <div className="text-center py-10 opacity-40 font-black text-xs uppercase tracking-widest">No matching assets found</div> : tools.map(tool => <ToolCard key={tool.id} tool={tool} onClick={() => setSelectedTool(tool)} />)}
-      </div>
-      {selectedTool && <ToolModal tool={selectedTool} onClose={() => setSelectedTool(null)} currentUser={currentUser} onUpdate={async (t) => { await onUpdateTool(t); setSelectedTool(null); }} />}
-      {showAddModal && <AddToolModal onClose={() => setShowAddModal(false)} onAdd={async (t) => { await onAddTool(t); setShowAddModal(false); }} currentUser={currentUser} />}
     </div>
   );
 };
 
-const MyToolsView: React.FC<{ tools: Tool[]; currentUser: User; onUpdateTool: (t: Tool) => Promise<void> }> = ({ tools, currentUser, onUpdateTool }) => {
-  const [selectedTool, setSelectedTool] = useState<Tool | null>(null);
+const MyToolsView: React.FC<any> = ({ tools, currentUser, onUpdateTool }) => {
   return (
     <div className="space-y-6">
-      <div className="bg-neda-navy text-white p-8 rounded-[2.5rem] shadow-xl relative overflow-hidden">
-        <h2 className="text-3xl font-black uppercase leading-none mb-2 relative z-10">My Field Kit</h2>
-        <p className="text-[10px] font-bold text-neda-lightOrange uppercase tracking-widest relative z-10">{tools.length} Assets in your care</p>
-        <div className="absolute top-0 right-0 w-32 h-32 bg-neda-orange opacity-20 rounded-full -mr-16 -mt-16 blur-2xl"></div>
+      <div className="bg-neda-navy p-8 rounded-[2.5rem] text-white">
+        <h2 className="text-3xl font-black uppercase">Field Kit</h2>
+        <p className="text-[10px] font-bold text-neda-orange uppercase mt-1 tracking-widest">{tools.length} Assets Assigned</p>
       </div>
-      <div className="grid gap-4">
-        {tools.length === 0 ? (
-          <div className="text-center py-20 bg-white rounded-3xl border border-dashed border-slate-200"><Package size={32} className="mx-auto text-slate-200 mb-3" /><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">No tools booked out</p></div>
-        ) : tools.map(tool => <ToolCard key={tool.id} tool={tool} onClick={() => setSelectedTool(tool)} />)}
+      <div className="grid gap-3">
+        {tools.map((tool: Tool) => (
+          <div key={tool.id} className="bg-white p-5 rounded-[1.5rem] border border-blue-100 shadow-md">
+            <h3 className="font-black text-neda-navy uppercase">{tool.name}</h3>
+            <button 
+              onClick={() => onUpdateTool({ ...tool, status: ToolStatus.AVAILABLE, currentHolderId: undefined, currentHolderName: undefined, currentSite: undefined })}
+              className="mt-4 w-full py-3 bg-slate-50 text-neda-navy border border-slate-100 rounded-xl font-black uppercase text-[10px] tracking-widest"
+            >
+              Return to Warehouse
+            </button>
+          </div>
+        ))}
       </div>
-      {selectedTool && <ToolModal tool={selectedTool} onClose={() => setSelectedTool(null)} currentUser={currentUser} onUpdate={async (t) => { await onUpdateTool(t); setSelectedTool(null); }} />}
     </div>
   );
 };
 
-const AddUserModal: React.FC<{ onClose: () => void; onAdd: (u: User) => Promise<void> }> = ({ onClose, onAdd }) => {
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [role, setRole] = useState<UserRole>(UserRole.USER);
-  const [password, setPassword] = useState('Neda123!');
-  const [loading, setLoading] = useState(false);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    try { await onAdd({ id: 'U' + Math.random().toString(36).substr(2, 5).toUpperCase(), name, email, role, password, isEnabled: true }); } catch (err) { console.error(err); } finally { setLoading(false); }
-  };
-
-  return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-neda-navy/60 backdrop-blur-sm p-4 animate-in fade-in">
-      <form onSubmit={handleSubmit} className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 space-y-5 shadow-2xl scale-in-95 animate-in">
-        <div className="flex justify-between items-center"><h2 className="text-xl font-black text-neda-navy uppercase tracking-tight">Register User</h2><button type="button" onClick={onClose} className="p-2 bg-slate-50 rounded-xl"><X size={18} /></button></div>
-        <div className="space-y-4">
-          <input type="text" placeholder="Full Name" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold outline-none" value={name} onChange={e => setName(e.target.value)} required />
-          <input type="email" placeholder="Email Address" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold outline-none" value={email} onChange={e => setEmail(e.target.value)} required />
-          <select className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-xs font-black uppercase" value={role} onChange={e => setRole(e.target.value as UserRole)}><option value={UserRole.USER}>User</option><option value={UserRole.MANAGER}>Manager</option><option value={UserRole.ADMIN}>Admin</option></select>
-          <input type="text" placeholder="Initial Password" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold outline-none" value={password} onChange={e => setPassword(e.target.value)} required />
-        </div>
-        <button type="submit" disabled={loading} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2">{loading ? <Loader2 className="animate-spin" size={18} /> : "Create Account"}</button>
-      </form>
-    </div>
-  );
-};
-
-const EditUserModal: React.FC<{ user: User; onClose: () => void; onUpdate: (u: User) => Promise<void> }> = ({ user, onClose, onUpdate }) => {
-  const [name, setName] = useState(user.name);
-  const [role, setRole] = useState<UserRole>(user.role);
-  const [password, setPassword] = useState(user.password || '');
-  const [loading, setLoading] = useState(false);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    try { await onUpdate({ ...user, name, role, password }); } catch (err) { console.error(err); } finally { setLoading(false); }
-  };
-
-  return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-neda-navy/60 backdrop-blur-sm p-4 animate-in fade-in">
-      <form onSubmit={handleSubmit} className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 space-y-5 shadow-2xl scale-in-95 animate-in">
-        <div className="flex justify-between items-center"><h2 className="text-xl font-black text-neda-navy uppercase tracking-tight">Edit Personnel</h2><button type="button" onClick={onClose} className="p-2 bg-slate-50 rounded-xl"><X size={18} /></button></div>
-        <div className="space-y-4">
-          <div className="space-y-1"><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Name</label><input type="text" placeholder="Full Name" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold outline-none" value={name} onChange={e => setName(e.target.value)} required /></div>
-          <div className="space-y-1"><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Access Level</label><select className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-xs font-black uppercase" value={role} onChange={e => setRole(e.target.value as UserRole)}><option value={UserRole.USER}>User</option><option value={UserRole.MANAGER}>Manager</option><option value={UserRole.ADMIN}>Admin</option></select></div>
-          <div className="space-y-1"><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Update Password</label><input type="text" placeholder="Password" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold outline-none" value={password} onChange={e => setPassword(e.target.value)} /></div>
-        </div>
-        <button type="submit" disabled={loading} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2">{loading ? <Loader2 className="animate-spin" size={18} /> : "Update Personnel"}</button>
-      </form>
-    </div>
-  );
-};
-
-const AdminDashboard: React.FC<{ 
-  tools: Tool[]; allUsers: User[]; currentUser: User; 
-  onUpdateUser: (u: User) => Promise<void>; onAddUser: (u: User) => Promise<void>; 
-  onBulkImport: (t: Tool[]) => Promise<void>;
-}> = ({ tools, allUsers, currentUser, onUpdateUser, onAddUser, onBulkImport }) => {
-  const [activeTab, setActiveTab] = useState<'REPORTS' | 'USERS'>('REPORTS');
-  const [showUserModal, setShowUserModal] = useState(false);
-  const [editingUser, setEditingUser] = useState<User | null>(null);
-  const [showPasswords, setShowPasswords] = useState<Record<string, boolean>>({});
+const AdminDashboard: React.FC<any> = ({ tools, allUsers, onAddUser, onBulkImport }) => {
+  const [activeTab, setActiveTab] = useState<'STOCK' | 'USERS'>('STOCK');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const togglePasswordVisibility = (userId: string) => { setShowPasswords(prev => ({ ...prev, [userId]: !prev[userId] })); };
-
-  const exportCSV = () => {
-    const headers = ['Asset ID', 'Name', 'Category', 'Serial', 'Status', 'Current Holder', 'Current Site'];
-    const rows = tools.map(t => [t.id, t.name, t.category || 'General', t.serialNumber || '', t.status, t.currentHolderName || 'Warehouse', t.currentSite || 'Warehouse']);
-    const csvContent = [headers, ...rows].map(e => e.join(",")).join("\n");
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.setAttribute("download", `neda_stocktake_${new Date().toISOString().split('T')[0]}.csv`);
-    link.click();
-  };
-
-  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImport = (e: any) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
@@ -555,151 +377,161 @@ const AdminDashboard: React.FC<{
       const lines = text.split(/\r?\n/).filter(l => l.trim());
       const dataLines = lines.slice(1);
       
-      const newTools: Tool[] = dataLines.map(line => {
-        const parts = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
-        const clean = (p: string) => p?.replace(/^"|"$/g, '').trim() || '';
-        
-        const statusMap = (s: string) => {
-          const val = clean(s).toLowerCase();
-          if (val.includes('field') || val.includes('out')) return ToolStatus.BOOKED_OUT;
-          return ToolStatus.AVAILABLE;
-        };
-
+      const imported: Tool[] = dataLines.map(line => {
+        const parts = line.split(',');
+        const clean = (p: string) => p?.trim().replace(/^"|"$/g, '') || '';
         return {
           id: clean(parts[0]) || 'T' + Math.random().toString(36).substr(2, 5).toUpperCase(),
-          name: clean(parts[1]) || 'Unnamed Asset',
+          name: clean(parts[1]) || 'Unnamed',
           category: clean(parts[2]) || 'General',
           dateOfPurchase: clean(parts[3]),
           numberOfItems: parseInt(clean(parts[4])) || 1,
-          mainPhoto: clean(parts[5]) || undefined,
-          currentHolderId: clean(parts[6]) || undefined,
-          currentHolderName: clean(parts[7]) || undefined,
-          currentSite: clean(parts[8]) || undefined,
-          status: statusMap(parts[9]),
-          notes: clean(parts[10]),
+          mainPhoto: clean(parts[5]),
+          currentHolderId: clean(parts[6]), 
+          currentHolderName: clean(parts[7]), 
+          currentSite: clean(parts[8]),
+          status: clean(parts[9])?.includes('Site') ? ToolStatus.BOOKED_OUT : ToolStatus.AVAILABLE,
+          notes: clean(parts[10]) || '',
           logs: []
         };
       });
-      onBulkImport(newTools);
+      onBulkImport(imported);
     };
     reader.readAsText(file);
   };
 
   return (
     <div className="space-y-6">
-      <div className="flex gap-2 bg-slate-100 p-1 rounded-2xl"><button onClick={() => setActiveTab('REPORTS')} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${activeTab === 'REPORTS' ? 'bg-white text-neda-navy shadow-sm' : 'text-slate-400'}`}>Stocktake</button><button onClick={() => setActiveTab('USERS')} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${activeTab === 'USERS' ? 'bg-white text-neda-navy shadow-sm' : 'text-slate-400'}`}>Personnel</button></div>
-      {activeTab === 'REPORTS' && (
-        <div className="space-y-6 animate-in fade-in duration-300">
-          <div className="grid grid-cols-2 gap-4"><StatCard label="Total Assets" value={tools.length} color="bg-neda-navy" /><StatCard label="In Field" value={tools.filter(t => t.status === ToolStatus.BOOKED_OUT).length} color="bg-neda-orange" /></div>
-          <div className="bg-white border border-slate-100 p-6 rounded-[2rem] space-y-4 shadow-sm"><div className="flex items-center gap-2 mb-2"><FileText size={16} className="text-neda-orange" /><h3 className="text-[10px] font-black text-neda-navy uppercase tracking-widest">Master Sheet Controls</h3></div><div className="grid grid-cols-1 gap-3"><button onClick={exportCSV} className="w-full py-4 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-between px-6 hover:border-neda-orange transition-all group"><div className="flex items-center gap-3"><Download size={18} className="text-neda-navy group-hover:text-neda-orange" /><span className="text-xs font-black text-neda-navy uppercase">Export Stocktake (CSV)</span></div><ArrowUpRight size={16} className="text-slate-300" /></button><button onClick={() => fileInputRef.current?.click()} className="w-full py-4 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-between px-6 hover:border-neda-orange transition-all group"><div className="flex items-center gap-3"><Upload size={18} className="text-neda-navy group-hover:text-neda-orange" /><span className="text-xs font-black text-neda-navy uppercase">Bulk Upload Assets</span></div><ArrowUpRight size={16} className="text-slate-300" /></button><input type="file" ref={fileInputRef} className="hidden" accept=".csv" onChange={handleImport} /></div></div>
+      <div className="flex gap-2 bg-slate-100 p-1 rounded-2xl">
+        <button onClick={() => setActiveTab('STOCK')} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase transition-all ${activeTab === 'STOCK' ? 'bg-white shadow-sm' : 'text-slate-400'}`}>Stocktake</button>
+        <button onClick={() => setActiveTab('USERS')} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase transition-all ${activeTab === 'USERS' ? 'bg-white shadow-sm' : 'text-slate-400'}`}>Personnel</button>
+      </div>
+
+      {activeTab === 'STOCK' ? (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <StatCard label="Assets" value={tools.length} color="bg-neda-navy" />
+            <StatCard label="In Field" value={tools.filter((t: Tool) => t.status === ToolStatus.BOOKED_OUT).length} color="bg-neda-orange" />
+          </div>
+          <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm space-y-4">
+            <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Controls</h3>
+            <button onClick={() => fileInputRef.current?.click()} className="w-full py-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between px-6 group hover:border-neda-orange transition-all">
+              <div className="flex items-center gap-3">
+                <Upload size={18} className="text-neda-navy" />
+                <span className="text-xs font-black uppercase">Bulk Sync Assets</span>
+              </div>
+              <ArrowUpRight size={16} className="text-slate-300" />
+            </button>
+            <input type="file" ref={fileInputRef} className="hidden" accept=".csv" onChange={handleImport} />
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {allUsers.map((u: User) => (
+            <div key={u.id} className="bg-white p-4 rounded-2xl border border-slate-100 flex justify-between items-center">
+              <div>
+                <p className="font-black text-neda-navy uppercase">{u.name}</p>
+                <p className="text-[9px] font-bold text-slate-300 uppercase">ID: {u.id}</p>
+              </div>
+              <span className="text-[9px] font-black uppercase px-2 py-1 bg-slate-50 rounded-lg">{u.role}</span>
+            </div>
+          ))}
+          <button className="w-full py-4 border-2 border-dashed border-slate-200 rounded-2xl text-[10px] font-black uppercase text-slate-300">Register New Person</button>
         </div>
       )}
-      {activeTab === 'USERS' && (
-        <div className="space-y-4 animate-in fade-in duration-300"><button onClick={() => setShowUserModal(true)} className="w-full py-4 bg-white border-2 border-dashed border-neda-navy/20 text-neda-navy rounded-2xl flex items-center justify-center gap-3 font-black text-xs uppercase hover:bg-slate-50 transition-colors"><UserPlus size={18} /> Register Personnel</button><div className="grid gap-3">{allUsers.map(user => (<div key={user.id} className="bg-white border border-slate-100 p-4 rounded-2xl shadow-sm relative overflow-hidden group"><div className="flex items-center justify-between"><div className="flex items-center gap-3"><div className="w-10 h-10 bg-neda-lightNavy rounded-full flex items-center justify-center font-black text-neda-navy text-sm uppercase">{user.name.charAt(0)}</div><div><p className="text-sm font-black text-neda-navy uppercase tracking-tight">{user.name}</p><p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{user.role} • {user.email}</p></div></div><div className="flex items-center gap-1"><button onClick={() => setEditingUser(user)} className="p-2 text-slate-300 hover:text-neda-navy transition-colors"><Edit size={16} /></button><button onClick={() => onUpdateUser({...user, isEnabled: !user.isEnabled})} className={`p-2 transition-colors ${user.isEnabled ? 'text-green-500 hover:bg-green-50 rounded-xl' : 'text-slate-200 hover:bg-slate-50 rounded-xl'}`}>{user.isEnabled ? <CheckCircle2 size={18} /> : <Trash2 size={18} />}</button></div></div><div className="mt-3 pt-3 border-t border-slate-50 flex items-center justify-between"><div className="flex items-center gap-2"><Lock size={12} className="text-slate-300" /><span className="text-[10px] font-mono font-bold text-neda-navy/40">{showPasswords[user.id] ? user.password : '••••••••'}</span></div><button onClick={() => togglePasswordVisibility(user.id)} className="text-[9px] font-black text-neda-orange uppercase tracking-widest">{showPasswords[user.id] ? 'Hide' : 'Reveal'}</button></div></div>))}</div></div>
-      )}
-      {showUserModal && <AddUserModal onClose={() => setShowUserModal(false)} onAdd={async (u) => { await onAddUser(u); setShowUserModal(false); }} />}
-      {editingUser && <EditUserModal user={editingUser} onClose={() => setEditingUser(null)} onUpdate={async (u) => { await onUpdateUser(u); setEditingUser(null); }} />}
     </div>
   );
 };
 
-const StatCard: React.FC<{ label: string; value: number; color: string }> = ({ label, value, color }) => (<div className={`${color} p-6 rounded-[2rem] text-white relative overflow-hidden shadow-md`}><p className="text-[9px] font-black uppercase tracking-widest opacity-60 leading-none">{label}</p><h3 className="text-3xl font-black mt-1 leading-none">{value}</h3><div className="absolute -bottom-4 -right-4 w-16 h-16 bg-white opacity-10 rounded-full blur-xl"></div></div>);
-
-const ToolCard: React.FC<{ tool: Tool; onClick: () => void }> = ({ tool, onClick }) => (
-  <button onClick={onClick} className="w-full text-left bg-white p-5 rounded-[1.5rem] border border-slate-100 shadow-sm hover:shadow-md transition-all active:scale-[0.98] group">
-    <div className="flex justify-between items-start mb-3"><div className="flex gap-4"><div className="w-12 h-12 rounded-xl bg-slate-50 flex items-center justify-center group-hover:bg-neda-lightOrange transition-colors"><Package size={20} className="text-neda-navy/20 group-hover:text-neda-orange transition-colors" /></div><div><h4 className="font-black text-neda-navy uppercase text-sm tracking-tight">{tool.name}</h4>{tool.serialNumber && <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-1">SN: {tool.serialNumber}</p>}</div></div><StatusBadge status={tool.status} /></div>
-    <div className="mt-4 pt-3 border-t border-slate-50 flex items-center justify-between text-[10px] font-bold uppercase text-neda-navy/60"><div className="flex items-center gap-2">{tool.status === ToolStatus.BOOKED_OUT ? <><UserIcon size={14} className="text-neda-orange" /> {tool.currentHolderName}</> : <span className="opacity-40">{tool.category || 'General'}</span>}</div>{tool.status === ToolStatus.BOOKED_OUT && <div className="flex items-center gap-2"><MapPin size={14} className="text-slate-300" /> {tool.currentSite}</div>}</div>
-  </button>
-);
-
-const ToolModal: React.FC<{ tool: Tool; onClose: () => void; currentUser: User; onUpdate: (t: Tool) => Promise<void>; }> = ({ tool, onClose, currentUser, onUpdate }) => {
-  const [action, setAction] = useState<'IDLE' | 'BOOKING' | 'RETURNING'>('IDLE');
-  const [site, setSite] = useState('');
-  const [loading, setLoading] = useState(false);
-  
-  const handleBooking = async () => {
-    setLoading(true);
-    await onUpdate({ ...tool, status: ToolStatus.BOOKED_OUT, currentHolderId: currentUser.id, currentHolderName: currentUser.name, currentSite: site, bookedAt: Date.now(), logs: [...tool.logs, { id: Math.random().toString(36).substr(2, 9), userId: currentUser.id, userName: currentUser.name, action: 'BOOK_OUT', timestamp: Date.now(), site }] });
-    setLoading(false);
-  };
-  const handleReturn = async () => {
-    setLoading(true);
-    await onUpdate({ ...tool, status: ToolStatus.AVAILABLE, currentHolderId: undefined, currentHolderName: undefined, currentSite: undefined, bookedAt: undefined, lastReturnedAt: Date.now(), logs: [...tool.logs, { id: Math.random().toString(36).substr(2, 9), userId: currentUser.id, userName: currentUser.name, action: 'RETURN', timestamp: Date.now() }] });
-    setLoading(false);
+const ToolModal: React.FC<any> = ({ tool, onClose, currentUser, onUpdate }) => {
+  const [site, setSite] = useState(tool.currentSite || '');
+  const handleAssign = async () => {
+    await onUpdate({ 
+      ...tool, 
+      status: ToolStatus.BOOKED_OUT, 
+      currentHolderId: currentUser.id, 
+      currentHolderName: currentUser.name, 
+      currentSite: site, 
+      bookedAt: Date.now() 
+    });
+    onClose();
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-neda-navy/60 backdrop-blur-sm p-0 sm:p-4">
-      <div className="bg-white w-full max-md rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 shadow-2xl relative max-h-[90vh] overflow-y-auto animate-in slide-in-from-bottom-10 sm:slide-in-from-bottom-0">
-        <div className="flex justify-between items-center mb-6"><div><h2 className="text-xl font-black text-neda-navy uppercase tracking-tighter">{tool.name}</h2><p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">Asset ID: {tool.id}</p></div><button onClick={onClose} className="p-2 bg-slate-50 rounded-xl"><X size={20} /></button></div>
-        {action === 'IDLE' && (<div className="space-y-6"><div className="flex justify-between items-center"><StatusBadge status={tool.status} /><span className="text-[10px] font-black text-slate-300 uppercase">{tool.category || 'General'}</span></div>{tool.status === ToolStatus.AVAILABLE && <button onClick={() => setAction('BOOKING')} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest active:scale-95 transition-all">Assign to Site</button>}{tool.status === ToolStatus.BOOKED_OUT && tool.currentHolderId === currentUser.id && <button onClick={() => setAction('RETURNING')} className="w-full py-5 bg-green-600 text-white rounded-2xl font-black uppercase tracking-widest active:scale-95 transition-all">Confirm Return</button>}</div>)}
-        {action === 'BOOKING' && (<div className="space-y-4 animate-in slide-in-from-right-4"><div className="space-y-1"><label className="text-[9px] font-black text-neda-navy/40 uppercase tracking-widest ml-1">Site Location</label><input type="text" placeholder="e.g. Waterfront Project" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm outline-none" value={site} onChange={e => setSite(e.target.value)} /></div><button onClick={handleBooking} disabled={!site || loading} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest disabled:opacity-50 active:scale-95 transition-all flex items-center justify-center gap-2">{loading && <Loader2 className="animate-spin" size={18} />} Assign Deployment</button></div>)}
-        {action === 'RETURNING' && (<div className="space-y-4 animate-in slide-in-from-right-4"><p className="text-xs font-bold text-neda-navy/60 text-center px-4">Confirming the return of this asset to the Neda Builda Warehouse.</p><button onClick={handleReturn} disabled={loading} className="w-full py-5 bg-green-600 text-white rounded-2xl font-black uppercase tracking-widest active:scale-95 transition-all flex items-center justify-center gap-2">{loading && <Loader2 className="animate-spin" size={18} />} Process Return</button></div>)}
+    <div className="fixed inset-0 z-[150] bg-neda-navy/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in">
+      <div className="bg-white w-full max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 shadow-2xl animate-in slide-in-from-bottom-10">
+        <div className="flex justify-between items-start mb-6">
+          <h2 className="text-xl font-black text-neda-navy uppercase">{tool.name}</h2>
+          <button onClick={onClose} className="p-2 bg-slate-50 rounded-xl"><X size={20} /></button>
+        </div>
+        <div className="space-y-4">
+          <input 
+            placeholder="Assign to Site..." 
+            className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold outline-none"
+            value={site}
+            onChange={(e) => setSite(e.target.value)}
+          />
+          <button onClick={handleAssign} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg">Confirm Deployment</button>
+        </div>
       </div>
     </div>
   );
 };
 
-const AddToolModal: React.FC<{ onClose: () => void; onAdd: (t: Tool) => Promise<void>; currentUser: User }> = ({ onClose, onAdd, currentUser }) => {
-  const [name, setName] = useState('');
-  const [serial, setSerial] = useState('');
-  const [category, setCategory] = useState('Power Tools');
-  const [loading, setLoading] = useState(false);
+const StatCard: React.FC<any> = ({ label, value, color }) => (
+  <div className={`${color} p-6 rounded-[2rem] text-white shadow-md relative overflow-hidden`}>
+    <p className="text-[9px] font-black uppercase opacity-60">{label}</p>
+    <p className="text-3xl font-black mt-1">{value}</p>
+    <div className="absolute -bottom-4 -right-4 w-16 h-16 bg-white opacity-10 rounded-full blur-xl"></div>
+  </div>
+);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    try { await onAdd({ id: 'T' + Math.random().toString(36).substr(2, 5).toUpperCase(), name, category, serialNumber: serial || undefined, status: ToolStatus.AVAILABLE, notes: '', logs: [{ id: 'L' + Date.now(), userId: currentUser.id, userName: currentUser.name, action: 'CREATE', timestamp: Date.now() }] }); } catch (e) {} finally { setLoading(false); }
-  };
+const StatusBadge: React.FC<any> = ({ status }) => {
+  const isAvailable = status === ToolStatus.AVAILABLE;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-neda-navy/60 backdrop-blur-sm p-4 animate-in fade-in">
-      <form onSubmit={handleSubmit} className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 space-y-5 shadow-2xl scale-in-95 animate-in">
-        <h2 className="text-xl font-black text-neda-navy uppercase tracking-tight">Register Asset</h2>
-        <div className="space-y-4">
-          <input type="text" placeholder="Asset Name" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold outline-none" value={name} onChange={e => setName(e.target.value)} required />
-          <input type="text" placeholder="Serial Number (Optional)" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold outline-none" value={serial} onChange={e => setSerial(e.target.value)} />
-          <select className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-xs font-black uppercase" value={category} onChange={e => setCategory(e.target.value)}><option>Power Tools</option><option>Heavy Machinery</option><option>Precision Gear</option><option>Safety Kit</option></select>
-        </div>
-        <button type="submit" disabled={loading} className="w-full py-5 bg-neda-orange text-white rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2">{loading ? <Loader2 className="animate-spin" size={18} /> : "Add to System"}</button>
-        <button onClick={onClose} type="button" className="w-full text-slate-400 font-bold uppercase text-[10px]">Cancel</button>
-      </form>
-    </div>
+    <span className={`text-[8px] font-black uppercase px-2 py-1 rounded-lg ${isAvailable ? 'bg-green-100 text-green-700' : 'bg-neda-lightOrange text-neda-orange'}`}>
+      {isAvailable ? 'Warehouse' : 'On Site'}
+    </span>
   );
 };
 
-const AIAssistant: React.FC<{ tools: Tool[] }> = ({ tools }) => {
+const AIAssistant: React.FC<any> = ({ tools }) => {
   const [query, setQuery] = useState('');
-  const [messages, setMessages] = useState<{ role: 'user' | 'assistant', content: string }[]>([]);
+  const [reply, setReply] = useState('');
   const [loading, setLoading] = useState(false);
-  const handleSend = async () => {
-    if (!query.trim()) return;
-    const msg = query; setQuery(''); setMessages(p => [...p, { role: 'user', content: msg }]);
+
+  const handleAsk = async () => {
     setLoading(true);
-    const reply = await analyzeTools(tools, msg);
-    setMessages(p => [...p, { role: 'assistant', content: reply }]);
+    const res = await analyzeTools(tools, query);
+    setReply(res);
     setLoading(false);
   };
+
   return (
-    <div className="flex flex-col h-[70vh] bg-slate-50 rounded-[2.5rem] overflow-hidden border border-slate-100 shadow-inner">
-       <div className="bg-neda-navy p-4 flex items-center gap-3 text-white"><Sparkles className="text-neda-orange" size={20} /><span className="font-black text-xs uppercase">Pulse Assistant</span></div>
-       <div className="flex-1 overflow-y-auto p-4 space-y-4 hide-scrollbar">
-          {messages.map((m, i) => (<div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}><div className={`text-[11px] font-bold p-4 rounded-2xl max-w-[85%] ${m.role === 'user' ? 'bg-neda-orange text-white rounded-tr-none' : 'bg-white text-neda-navy border border-slate-100 rounded-tl-none'}`}>{m.content}</div></div>))}
-          {loading && <div className="flex justify-start px-2"><Loader2 className="animate-spin text-neda-navy opacity-20" size={16} /></div>}
-       </div>
-       <div className="p-4 bg-white border-t border-slate-100 flex gap-2"><input type="text" placeholder="Ask Pulse..." className="flex-1 p-4 bg-slate-50 rounded-2xl text-xs font-bold outline-none" value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSend()} /><button onClick={handleSend} className="p-4 bg-neda-navy text-white rounded-2xl"><Send size={18} /></button></div>
+    <div className="space-y-4">
+      <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100">
+        <h2 className="text-xl font-black text-neda-navy uppercase flex items-center gap-2">
+          <Sparkles className="text-neda-orange" /> Pulse AI
+        </h2>
+        <div className="mt-6 flex gap-2">
+          <input 
+            placeholder="Ask anything..." 
+            className="flex-1 p-4 bg-slate-50 rounded-2xl font-bold text-xs outline-none"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          <button onClick={handleAsk} className="p-4 bg-neda-navy text-white rounded-2xl">
+            {loading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
+          </button>
+        </div>
+        {reply && (
+          <div className="mt-4 p-5 bg-slate-50 rounded-2xl text-[11px] font-bold text-slate-700 leading-relaxed border border-blue-50">
+            {reply}
+          </div>
+        )}
+      </div>
     </div>
   );
-};
-
-const StatusBadge: React.FC<{ status: ToolStatus }> = ({ status }) => {
-  const configs = {
-    [ToolStatus.AVAILABLE]: { label: 'Warehouse', color: 'bg-green-100 text-green-700' },
-    [ToolStatus.BOOKED_OUT]: { label: 'Site Active', color: 'bg-neda-lightOrange text-neda-orange' },
-    [ToolStatus.UNDER_REPAIR]: { label: 'In Repair', color: 'bg-neda-lightNavy text-neda-navy' },
-    [ToolStatus.DEFECTIVE]: { label: 'Faulty', color: 'bg-red-100 text-red-600' }
-  };
-  const config = configs[status];
-  return <span className={`text-[8px] font-black px-2.5 py-1 rounded-lg uppercase tracking-widest ${config.color}`}>{config.label}</span>;
 };
 
 export default App;
