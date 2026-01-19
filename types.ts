@@ -1,3 +1,4 @@
+
 export enum ToolStatus {
   AVAILABLE = 'AVAILABLE',
   BOOKED_OUT = 'BOOKED_OUT',
@@ -18,6 +19,7 @@ export interface User {
   email: string;
   password?: string;
   isEnabled: boolean;
+  mustChangePassword?: boolean;
 }
 
 export interface ToolLog {

@@ -25,7 +25,8 @@ const mapUserToDb = (user: User) => cleanPayload({
   role: user.role,
   email: user.email,
   password: user.password,
-  is_enabled: user.isEnabled
+  is_enabled: user.isEnabled,
+  must_change_password: user.mustChangePassword
 });
 
 const mapDbToUser = (dbUser: any): User => ({
@@ -34,7 +35,8 @@ const mapDbToUser = (dbUser: any): User => ({
   role: dbUser.role,
   email: dbUser.email,
   password: dbUser.password,
-  isEnabled: dbUser.is_enabled
+  isEnabled: dbUser.is_enabled,
+  mustChangePassword: dbUser.must_change_password
 });
 
 /**
