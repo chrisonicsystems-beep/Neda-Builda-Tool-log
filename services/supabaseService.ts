@@ -33,8 +33,8 @@ const mapDbToUser = (dbUser: any): User => ({
 
 const mapToolToDb = (tool: Tool) => ({
   id: tool.id,
-  name: tool.name,
-  // Removed category from DB sync to resolve schema mismatch errors
+  // Changed from 'name' to 'tool_name' to resolve schema mismatch error seen in logs
+  tool_name: tool.name, 
   serial_number: tool.serialNumber,
   status: tool.status,
   current_holder_id: tool.currentHolderId,
@@ -48,8 +48,9 @@ const mapToolToDb = (tool: Tool) => ({
 
 const mapDbToTool = (dbTool: any): Tool => ({
   id: dbTool.id,
-  name: dbTool.name,
-  category: dbTool.category || 'General', // Fallback if column exists but is empty, or if we want a default
+  // Support both 'tool_name' and fallback 'name' if schema differs
+  name: dbTool.tool_name || dbTool.name || 'Unnamed Asset',
+  category: dbTool.category || 'General',
   serialNumber: dbTool.serial_number,
   status: dbTool.status as any,
   currentHolderId: dbTool.current_holder_id,
@@ -63,7 +64,7 @@ const mapDbToTool = (dbTool: any): Tool => ({
 
 export const upsertSingleTool = async (tool: Tool) => {
   if (!supabase) return;
-  const { error } = await supabase.from('tools').upsert(mapToolToDb(tool));
+  const { error } = await supabase.from('tools').upsert(mapToolToDb(tool), { onConflict: 'id' });
   if (error) {
     console.error("Supabase Error (upsertSingleTool):", error);
     if (error.code === '23505') throw new Error(`Asset with this ID or Serial already exists.`);
@@ -73,7 +74,7 @@ export const upsertSingleTool = async (tool: Tool) => {
 
 export const upsertSingleUser = async (user: User) => {
   if (!supabase) return;
-  const { error } = await supabase.from('users').upsert(mapUserToDb(user));
+  const { error } = await supabase.from('users').upsert(mapUserToDb(user), { onConflict: 'id' });
   if (error) {
     console.error("Supabase Error (upsertSingleUser):", error);
     if (error.code === '23505') throw new Error(`Personnel with this Email already exists.`);
@@ -84,8 +85,11 @@ export const upsertSingleUser = async (user: User) => {
 export const syncTools = async (tools: Tool[]) => {
   if (!supabase) return;
   const dbTools = tools.map(mapToolToDb);
-  const { error } = await supabase.from('tools').upsert(dbTools);
-  if (error) throw error;
+  const { error } = await supabase.from('tools').upsert(dbTools, { onConflict: 'id' });
+  if (error) {
+    console.error("Supabase Sync Error:", error);
+    throw error;
+  }
 };
 
 export const fetchTools = async (): Promise<Tool[] | null> => {
@@ -101,7 +105,7 @@ export const fetchTools = async (): Promise<Tool[] | null> => {
 export const syncUsers = async (users: User[]) => {
   if (!supabase) return;
   const dbUsers = users.map(mapUserToDb);
-  const { error } = await supabase.from('users').upsert(dbUsers);
+  const { error } = await supabase.from('users').upsert(dbUsers, { onConflict: 'id' });
   if (error) throw error;
 };
 

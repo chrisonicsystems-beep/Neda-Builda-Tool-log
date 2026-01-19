@@ -101,19 +101,19 @@ const App: React.FC = () => {
     if (remember) {
       localStorage.setItem('et_user', JSON.stringify(user));
     }
-    // Always store the last user email to facilitate biometrics for the right person
+    // Always store the last user's info for biometric login identify
     localStorage.setItem('et_last_email', user.email);
     
     // Trigger prompt if biometrics not already enabled for this specific user
     if (!localStorage.getItem(`bio_enabled_${user.id}`)) {
-      // Delay prompt slightly for better UX
-      setTimeout(() => setShowBiometricPrompt(true), 1000);
+      setTimeout(() => setShowBiometricPrompt(true), 1200);
     }
   };
 
   const handleLogout = () => {
     setCurrentUser(null);
     localStorage.removeItem('et_user');
+    // Note: we DON'T remove et_last_email or bio_enabled keys so biometrics works next time
   };
 
   const enableBiometrics = () => {
@@ -303,10 +303,10 @@ const LoginScreen: React.FC<{
   useEffect(() => {
     // Check if there was a previous user who enabled biometrics
     const lastEmail = localStorage.getItem('et_last_email');
-    if (lastEmail) {
-      const user = users.find(u => u.email.toLowerCase() === lastEmail.toLowerCase());
-      if (user && localStorage.getItem(`bio_enabled_${user.id}`)) {
-        setBioUser(user);
+    if (lastEmail && users.length > 0) {
+      const foundUser = users.find(u => u.email.toLowerCase() === lastEmail.toLowerCase());
+      if (foundUser && localStorage.getItem(`bio_enabled_${foundUser.id}`) === 'true') {
+        setBioUser(foundUser);
       }
     }
   }, [users]);
@@ -323,7 +323,7 @@ const LoginScreen: React.FC<{
 
   const handleBioLogin = () => {
     if (!bioUser) return;
-    // Simulate a biometric check success
+    // Emulate biometric success (FaceID/TouchID prompt logic would go here)
     onLogin(bioUser, true);
   };
 
@@ -360,7 +360,10 @@ const LoginScreen: React.FC<{
                  <Fingerprint size={20} /> Use Biometrics
                </button>
                <button 
-                 onClick={() => setBioUser(null)}
+                 onClick={() => {
+                   setBioUser(null);
+                   setEmail(bioUser.email);
+                 }}
                  className="w-full py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-neda-orange transition-colors"
                >
                  Use different account
@@ -448,7 +451,7 @@ const ResetPasswordModal: React.FC<{ onClose: () => void; onReset: (email: strin
         
         {status !== 'success' ? (
           <form onSubmit={handleSubmit} className="space-y-5">
-            <p className="text-xs text-slate-500 font-medium">Enter your work email and we'll reset your password to a default value.</p>
+            <p className="text-xs text-slate-500 font-medium text-center">Enter your work email and we'll reset your password to a default value.</p>
             <input 
               type="email" 
               placeholder="Work Email" 
@@ -457,7 +460,7 @@ const ResetPasswordModal: React.FC<{ onClose: () => void; onReset: (email: strin
               onChange={e => setEmail(e.target.value)} 
               required 
             />
-            {status === 'error' && <p className="text-red-500 text-[10px] font-black">{msg}</p>}
+            {status === 'error' && <p className="text-red-500 text-[10px] font-black text-center">{msg}</p>}
             <button type="submit" disabled={loading} className="w-full py-4 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest flex items-center justify-center gap-2">
               {loading ? <Loader2 className="animate-spin" size={18} /> : "Reset My Password"}
             </button>
