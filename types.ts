@@ -35,8 +35,8 @@ export interface ToolLog {
 export interface Tool {
   id: string;
   name: string;
-  category?: string; // Made optional to avoid DB schema strictness
-  serialNumber: string;
+  category?: string;
+  serialNumber?: string; // Made optional as requested and per DB schema
   status: ToolStatus;
   currentHolderId?: string;
   currentHolderName?: string;

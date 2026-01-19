@@ -33,9 +33,8 @@ const mapDbToUser = (dbUser: any): User => ({
 
 const mapToolToDb = (tool: Tool) => ({
   id: tool.id,
-  // Changed from 'name' to 'tool_name' to resolve schema mismatch error seen in logs
   tool_name: tool.name, 
-  serial_number: tool.serialNumber,
+  // serial_number removed as it does not exist in the DB schema
   status: tool.status,
   current_holder_id: tool.currentHolderId,
   current_holder_name: tool.currentHolderName,
@@ -48,10 +47,9 @@ const mapToolToDb = (tool: Tool) => ({
 
 const mapDbToTool = (dbTool: any): Tool => ({
   id: dbTool.id,
-  // Support both 'tool_name' and fallback 'name' if schema differs
   name: dbTool.tool_name || dbTool.name || 'Unnamed Asset',
   category: dbTool.category || 'General',
-  serialNumber: dbTool.serial_number,
+  serialNumber: dbTool.serial_number || '', // Provide empty string if it ever returns from DB
   status: dbTool.status as any,
   currentHolderId: dbTool.current_holder_id,
   currentHolderName: dbTool.current_holder_name,
@@ -67,7 +65,7 @@ export const upsertSingleTool = async (tool: Tool) => {
   const { error } = await supabase.from('tools').upsert(mapToolToDb(tool), { onConflict: 'id' });
   if (error) {
     console.error("Supabase Error (upsertSingleTool):", error);
-    if (error.code === '23505') throw new Error(`Asset with this ID or Serial already exists.`);
+    if (error.code === '23505') throw new Error(`Asset with this ID already exists.`);
     throw error;
   }
 };

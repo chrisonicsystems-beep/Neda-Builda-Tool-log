@@ -113,7 +113,6 @@ const App: React.FC = () => {
   const handleLogout = () => {
     setCurrentUser(null);
     localStorage.removeItem('et_user');
-    // Note: we DON'T remove et_last_email or bio_enabled keys so biometrics works next time
   };
 
   const enableBiometrics = () => {
@@ -201,9 +200,10 @@ const App: React.FC = () => {
 
   const filteredTools = useMemo(() => {
     return tools.filter(t => {
-      const matchesSearch = t.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        t.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        t.serialNumber.toLowerCase().includes(searchTerm.toLowerCase());
+      const nameMatch = t.name.toLowerCase().includes(searchTerm.toLowerCase());
+      const idMatch = t.id.toLowerCase().includes(searchTerm.toLowerCase());
+      const serialMatch = t.serialNumber?.toLowerCase().includes(searchTerm.toLowerCase()) || false;
+      const matchesSearch = nameMatch || idMatch || serialMatch;
       const matchesStatus = statusFilter === 'ALL' || t.status === statusFilter;
       const matchesUser = userFilter === 'ALL' || t.currentHolderId === userFilter;
       return matchesSearch && matchesStatus && matchesUser;
@@ -570,7 +570,7 @@ const AdminDashboard: React.FC<{
   const exportCSV = () => {
     const headers = ['Asset ID', 'Name', 'Category', 'Serial', 'Status', 'Current Holder', 'Current Site'];
     const rows = tools.map(t => [
-      t.id, t.name, t.category || 'General', t.serialNumber, t.status, 
+      t.id, t.name, t.category || 'General', t.serialNumber || '', t.status, 
       t.currentHolderName || 'Warehouse', t.currentSite || 'Warehouse'
     ]);
     const csvContent = [headers, ...rows].map(e => e.join(",")).join("\n");
@@ -594,7 +594,7 @@ const AdminDashboard: React.FC<{
           id: parts[0]?.trim() || 'T' + Math.random().toString(36).substr(2, 5).toUpperCase(),
           name: parts[1]?.trim() || 'Unknown Asset',
           category: parts[2]?.trim() || 'General',
-          serialNumber: parts[3]?.trim() || 'S/N',
+          serialNumber: parts[3]?.trim() || '',
           status: ToolStatus.AVAILABLE,
           logs: []
         };
@@ -818,7 +818,7 @@ const ToolCard: React.FC<{ tool: Tool; onClick: () => void }> = ({ tool, onClick
         <div className="w-12 h-12 rounded-xl bg-slate-50 flex items-center justify-center group-hover:bg-neda-lightOrange transition-colors"><Package size={20} className="text-neda-navy/20 group-hover:text-neda-orange transition-colors" /></div>
         <div>
           <h4 className="font-black text-neda-navy uppercase text-sm tracking-tight">{tool.name}</h4>
-          <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-1">SN: {tool.serialNumber}</p>
+          {tool.serialNumber && <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-1">SN: {tool.serialNumber}</p>}
         </div>
       </div>
       <StatusBadge status={tool.status} />
@@ -904,7 +904,7 @@ const AddToolModal: React.FC<{ onClose: () => void; onAdd: (t: Tool) => Promise<
         id: 'T' + Math.random().toString(36).substr(2, 5).toUpperCase(), 
         name, 
         category, 
-        serialNumber: serial, 
+        serialNumber: serial || undefined, 
         status: ToolStatus.AVAILABLE, 
         logs: [{ id: 'L' + Date.now(), userId: currentUser.id, userName: currentUser.name, action: 'CREATE', timestamp: Date.now() }] 
       });
@@ -919,7 +919,7 @@ const AddToolModal: React.FC<{ onClose: () => void; onAdd: (t: Tool) => Promise<
         <h2 className="text-xl font-black text-neda-navy uppercase tracking-tight">Register Asset</h2>
         <div className="space-y-4">
           <input type="text" placeholder="Asset Name" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold outline-none" value={name} onChange={e => setName(e.target.value)} required />
-          <input type="text" placeholder="Serial Number" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold outline-none" value={serial} onChange={e => setSerial(e.target.value)} required />
+          <input type="text" placeholder="Serial Number (Optional)" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold outline-none" value={serial} onChange={e => setSerial(e.target.value)} />
           <select className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-xs font-black uppercase" value={category} onChange={e => setCategory(e.target.value)}>
              <option>Power Tools</option>
              <option>Heavy Machinery</option>
