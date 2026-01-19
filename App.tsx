@@ -35,7 +35,10 @@ import {
   ShieldAlert,
   Save,
   Mail,
-  Info
+  Info,
+  Key,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { analyzeTools, searchAddresses } from './services/geminiService';
 import { fetchTools, fetchUsers, syncTools, syncUsers, upsertSingleTool, upsertSingleUser, supabase } from './services/supabaseService';
@@ -177,6 +180,21 @@ const App: React.FC = () => {
     }
   };
 
+  const updateUser = async (updatedUser: User) => {
+    setIsSyncing(true);
+    try {
+      await upsertSingleUser(updatedUser);
+      setAllUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
+      setSyncSuccess(`Account for ${updatedUser.name} updated.`);
+      setTimeout(() => setSyncSuccess(null), 3000);
+      setSyncError(null);
+    } catch (e: any) {
+      setSyncError(e.message || "Update Failed");
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const filteredTools = useMemo(() => {
     return tools.filter(t => {
       const matchesSearch = t.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
@@ -261,6 +279,7 @@ const App: React.FC = () => {
           tools={tools} 
           allUsers={allUsers} 
           onAddUser={addUser} 
+          onUpdateUser={updateUser}
           onBulkImport={bulkAddTools} 
           userRole={currentUser.role}
         />
@@ -326,6 +345,11 @@ const LoginScreen: React.FC<{
     e.preventDefault();
     const user = users.find(u => u.email.toLowerCase() === email.toLowerCase());
     if (user) {
+      // Check password if it's not a biometric auth session
+      if (user.password && user.password !== password) {
+        setError('Incorrect password. Please try again.');
+        return;
+      }
       onLogin(user, rememberMe);
     } else {
       setError('Account not found. Please check your email.');
@@ -565,10 +589,16 @@ const MyToolsView: React.FC<any> = ({ tools, currentUser, onUpdateTool }) => {
   );
 };
 
-const AdminDashboard: React.FC<any> = ({ tools, allUsers, onAddUser, onBulkImport, userRole }) => {
+const AdminDashboard: React.FC<any> = ({ tools, allUsers, onAddUser, onUpdateUser, onBulkImport, userRole }) => {
   const [activeTab, setActiveTab] = useState<'STOCK' | 'USERS'>('STOCK');
   const [showAddUser, setShowAddUser] = useState(false);
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [showPasswords, setShowPasswords] = useState<Record<string, boolean>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const togglePasswordVisibility = (userId: string) => {
+    setShowPasswords(prev => ({ ...prev, [userId]: !prev[userId] }));
+  };
 
   const downloadCSVTemplate = () => {
     const headers = "id,equipment_tool,equipment_type,date_of_purchase,number_of_items,main_photo,current_holder_id,current_holder_name,current_site,status,notes,booked_at,last_returned_at,logs,serial_number";
@@ -712,20 +742,43 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onAddUser, onBulkImpor
       ) : (
         <div className="space-y-3">
           {allUsers.map((u: User) => (
-            <div key={u.id} className="bg-white p-5 rounded-[1.5rem] border border-slate-100 flex justify-between items-center shadow-sm">
-              <div className="flex items-center gap-4">
-                <div className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center border border-slate-100">
-                  <UserIcon size={20} className="text-slate-300" />
+            <div key={u.id} className="bg-white p-5 rounded-[1.5rem] border border-slate-100 flex flex-col shadow-sm">
+              <div className="flex justify-between items-center w-full">
+                <div className="flex items-center gap-4 min-w-0">
+                  <div className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center border border-slate-100 shrink-0">
+                    <UserIcon size={20} className="text-slate-300" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-black text-neda-navy uppercase text-xs truncate">{u.name}</p>
+                    <p className="text-[9px] font-bold text-slate-300 uppercase">ID: {u.id}</p>
+                    <p className="text-[7px] font-bold text-slate-400 uppercase truncate">{u.email}</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="font-black text-neda-navy uppercase text-xs">{u.name}</p>
-                  <p className="text-[9px] font-bold text-slate-300 uppercase">ID: {u.id}</p>
-                  <p className="text-[7px] font-bold text-slate-400 uppercase">{u.email}</p>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className={`text-[8px] font-black uppercase px-2 py-1 rounded-lg ${u.role !== UserRole.USER ? 'bg-neda-navy text-white' : 'bg-slate-50 text-slate-400'}`}>
+                    {u.role}
+                  </span>
+                  <button onClick={() => setEditingUser(u)} className="p-2 text-slate-300 hover:text-neda-orange transition-colors">
+                    <Edit size={16} />
+                  </button>
                 </div>
               </div>
-              <span className={`text-[8px] font-black uppercase px-2.5 py-1 rounded-lg ${u.role !== UserRole.USER ? 'bg-neda-navy text-white' : 'bg-slate-50 text-slate-400'}`}>
-                {u.role}
-              </span>
+
+              {/* Administrative Password View */}
+              {(userRole === UserRole.ADMIN || userRole === UserRole.MANAGER) && (
+                <div className="mt-4 pt-4 border-t border-slate-50 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Key size={12} className="text-slate-300" />
+                    <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Master Key:</span>
+                    <span className="text-[10px] font-mono font-bold text-neda-navy bg-slate-50 px-2 py-0.5 rounded">
+                      {showPasswords[u.id] ? (u.password || 'none') : '••••••••'}
+                    </span>
+                  </div>
+                  <button onClick={() => togglePasswordVisibility(u.id)} className="text-slate-300 hover:text-neda-navy p-1 transition-colors">
+                    {showPasswords[u.id] ? <EyeOff size={14} /> : <Eye size={14} />}
+                  </button>
+                </div>
+              )}
             </div>
           ))}
           <button 
@@ -736,6 +789,7 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onAddUser, onBulkImpor
           </button>
           
           {showAddUser && <AddUserModal onClose={() => setShowAddUser(false)} onAdd={onAddUser} />}
+          {editingUser && <EditUserModal user={editingUser} onClose={() => setEditingUser(null)} onUpdate={onUpdateUser} />}
         </div>
       )}
     </div>
@@ -746,6 +800,7 @@ const AddUserModal: React.FC<{ onClose: () => void; onAdd: (u: User) => void }> 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<UserRole>(UserRole.USER);
+  const [password, setPassword] = useState('welcome' + Math.floor(100 + Math.random() * 900));
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -755,7 +810,7 @@ const AddUserModal: React.FC<{ onClose: () => void; onAdd: (u: User) => void }> 
       email,
       role,
       isEnabled: true,
-      password: 'password123'
+      password: password
     });
     onClose();
   };
@@ -768,14 +823,77 @@ const AddUserModal: React.FC<{ onClose: () => void; onAdd: (u: User) => void }> 
           <button onClick={onClose} className="p-2 bg-slate-50 rounded-xl"><X size={20} /></button>
         </div>
         <form onSubmit={handleSubmit} className="space-y-4">
-          <input placeholder="Full Name (e.g. Callum Law)" required className="w-full p-4 bg-slate-50 rounded-2xl font-bold text-sm border border-slate-100" value={name} onChange={e => setName(e.target.value)} />
+          <input placeholder="Full Name" required className="w-full p-4 bg-slate-50 rounded-2xl font-bold text-sm border border-slate-100" value={name} onChange={e => setName(e.target.value)} />
           <input type="email" placeholder="Email Address" required className="w-full p-4 bg-slate-50 rounded-2xl font-bold text-sm border border-slate-100" value={email} onChange={e => setEmail(e.target.value)} />
+          <div className="space-y-1">
+            <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest pl-1">Starting Password</span>
+            <input placeholder="Password" required className="w-full p-4 bg-slate-50 rounded-2xl font-bold text-sm border border-slate-100" value={password} onChange={e => setPassword(e.target.value)} />
+          </div>
           <div className="flex gap-2">
              <button type="button" onClick={() => setRole(UserRole.USER)} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase border transition-all ${role === UserRole.USER ? 'bg-neda-navy text-white border-neda-navy' : 'bg-white border-slate-100 text-slate-400'}`}>Staff</button>
              <button type="button" onClick={() => setRole(UserRole.MANAGER)} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase border transition-all ${role === UserRole.MANAGER ? 'bg-neda-navy text-white border-neda-navy' : 'bg-white border-slate-100 text-slate-400'}`}>Manager</button>
           </div>
           <button type="submit" className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg mt-4 flex items-center justify-center gap-2">
              <Save size={18} /> Register Personnel
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+const EditUserModal: React.FC<{ user: User; onClose: () => void; onUpdate: (u: User) => void }> = ({ user, onClose, onUpdate }) => {
+  const [name, setName] = useState(user.name);
+  const [password, setPassword] = useState(user.password || '');
+  const [role, setRole] = useState<UserRole>(user.role);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onUpdate({
+      ...user,
+      name,
+      password,
+      role
+    });
+    onClose();
+  };
+
+  const handleGenerateTemp = () => {
+    const temp = 'temp' + Math.floor(1000 + Math.random() * 9000);
+    setPassword(temp);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[200] bg-neda-navy/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in">
+      <div className="bg-white w-full max-w-sm rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 pb-10 shadow-2xl animate-in slide-in-from-bottom-10">
+        <div className="flex justify-between items-center mb-6">
+          <div>
+            <h2 className="text-xl font-black text-neda-navy uppercase">Manage Account</h2>
+            <p className="text-[8px] font-bold text-slate-400 uppercase mt-0.5">{user.email}</p>
+          </div>
+          <button onClick={onClose} className="p-2 bg-slate-50 rounded-xl"><X size={20} /></button>
+        </div>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-1">
+            <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest pl-1">Full Name</span>
+            <input placeholder="Full Name" required className="w-full p-4 bg-slate-50 rounded-2xl font-bold text-sm border border-slate-100" value={name} onChange={e => setName(e.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <div className="flex justify-between items-center px-1">
+              <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Access Key (Password)</span>
+              <button type="button" onClick={handleGenerateTemp} className="text-[8px] font-black text-neda-orange uppercase">Generate Temp</button>
+            </div>
+            <input placeholder="Password" required className="w-full p-4 bg-slate-50 rounded-2xl font-bold text-sm border border-slate-100" value={password} onChange={e => setPassword(e.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest pl-1">Access Role</span>
+            <div className="flex gap-2">
+               <button type="button" onClick={() => setRole(UserRole.USER)} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase border transition-all ${role === UserRole.USER ? 'bg-neda-navy text-white border-neda-navy' : 'bg-white border-slate-100 text-slate-400'}`}>Staff</button>
+               <button type="button" onClick={() => setRole(UserRole.MANAGER)} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase border transition-all ${role === UserRole.MANAGER ? 'bg-neda-navy text-white border-neda-navy' : 'bg-white border-slate-100 text-slate-400'}`}>Manager</button>
+            </div>
+          </div>
+          <button type="submit" className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg mt-4 flex items-center justify-center gap-2">
+             <Save size={18} /> Update Access Details
           </button>
         </form>
       </div>
