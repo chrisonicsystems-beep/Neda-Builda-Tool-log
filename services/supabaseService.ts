@@ -92,7 +92,6 @@ export const upsertSingleTool = async (tool: Tool) => {
  * Upserts a user using a 'Core-First' strategy.
  * 1. Saves mandatory core data (ID, Name, Email, Role, Password).
  * 2. Attempts to save metadata (isEnabled, mustChangePassword) as a secondary step.
- * This prevents missing column errors from stopping core functionality like password resets.
  */
 export const upsertSingleUser = async (user: User) => {
   if (!supabase) return;
@@ -107,14 +106,14 @@ export const upsertSingleUser = async (user: User) => {
     throw new Error(`Database Error: ${coreError.message}`);
   }
 
-  // Step 2: Try Metadata (Optional - will not throw if it fails)
+  // Step 2: Try Metadata (Optional - will not throw if columns are missing)
   try {
     const { error: metaError } = await supabase
       .from('users')
       .upsert(mapUserToMetadataDb(user), { onConflict: 'id' });
     
     if (metaError) {
-      console.warn("User Metadata Sync failed (schema mismatch likely):", metaError.message);
+      console.warn("Metadata sync skipped:", metaError.message);
     }
   } catch (err) {
     console.warn("Silent failure updating user metadata:", err);
@@ -125,10 +124,7 @@ export const syncTools = async (tools: Tool[]) => {
   if (!supabase || tools.length === 0) return;
   const dbTools = tools.map(mapToolToDb);
   const { error } = await supabase.from('tools').upsert(dbTools, { onConflict: 'id' });
-  if (error) {
-    console.error("Supabase Bulk Sync Error:", error);
-    throw error;
-  }
+  if (error) throw error;
 };
 
 export const fetchTools = async (): Promise<Tool[] | null> => {
