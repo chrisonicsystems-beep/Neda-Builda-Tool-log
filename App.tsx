@@ -48,7 +48,8 @@ import {
   Stethoscope,
   Navigation,
   RefreshCcw,
-  Clock
+  Clock,
+  Warehouse
 } from 'lucide-react';
 import { analyzeTools, searchAddresses } from './services/geminiService';
 import { fetchTools, fetchUsers, syncTools, syncUsers, upsertSingleTool, upsertSingleUser, deleteSingleUser, supabase } from './services/supabaseService';
@@ -458,20 +459,21 @@ const BookOutModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (tool
       window.clearTimeout(searchTimeoutRef.current);
     }
 
-    if (value.length > 3) {
+    if (value.trim().length >= 3) {
       setIsSearching(true);
       searchTimeoutRef.current = window.setTimeout(async () => {
         const results = await searchAddresses(value);
         setSuggestions(results);
         setIsSearching(false);
-      }, 500);
+      }, 600); // Slightly longer debounce for stable mobile typing
     } else {
       setSuggestions([]);
       setIsSearching(false);
     }
   };
 
-  const handleSelectSuggestion = (addr: string) => {
+  const handleSelectSuggestion = (e: React.MouseEvent | React.TouchEvent, addr: string) => {
+    e.preventDefault(); // Critical for mobile to prevent blur clearing suggestions before selection
     setAddressInput(addr);
     setSuggestions([]);
   };
@@ -483,7 +485,7 @@ const BookOutModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (tool
 
   return (
     <div className="fixed inset-0 z-[700] bg-neda-navy/90 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in">
-      <div className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 shadow-2xl animate-in zoom-in-95">
+      <div className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 shadow-2xl animate-in zoom-in-95 overflow-visible">
         <div className="flex justify-between items-center mb-6">
           <div className="flex flex-col">
             <span className="text-[8px] font-black text-neda-orange uppercase tracking-widest mb-1">Book Out Equipment</span>
@@ -495,37 +497,40 @@ const BookOutModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (tool
         <div className="space-y-5">
           <div className="space-y-1 relative">
             <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest pl-1">Destination Site Address</span>
-            <div className="relative">
+            <div className="relative z-[710]">
               <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={16} />
               <input 
                 autoFocus
                 type="text"
-                placeholder="Search or enter address..."
+                placeholder="Start typing site address..."
                 className="w-full p-4 pl-12 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-xs outline-none focus:ring-2 focus:ring-neda-navy/5 transition-all"
                 value={addressInput}
                 onChange={handleAddressChange}
               />
               {isSearching && (
-                <div className="absolute right-4 top-1/2 -translate-y-1/2">
+                <div className="absolute right-4 top-1/2 -translate-y-1/2 bg-slate-50 pl-2">
                   <Loader2 className="animate-spin text-neda-orange" size={14} />
                 </div>
               )}
             </div>
 
-            {suggestions.length > 0 && (
-              <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden z-50 animate-in slide-in-from-top-2">
+            {/* Suggestions dropdown with stable z-index and pointer interaction */}
+            <div className={`absolute top-full left-0 right-0 mt-2 bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden z-[720] transition-all duration-200 transform origin-top ${suggestions.length > 0 ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'}`}>
+              <div className="max-h-[180px] overflow-y-auto hide-scrollbar divide-y divide-slate-50">
                 {suggestions.map((addr, idx) => (
                   <button 
                     key={idx}
-                    onClick={() => handleSelectSuggestion(addr)}
-                    className="w-full text-left px-5 py-3 text-[10px] font-bold text-slate-600 hover:bg-slate-50 border-b border-slate-50 last:border-0 flex items-center gap-3 transition-colors"
+                    onPointerDown={(e) => handleSelectSuggestion(e, addr)}
+                    className="w-full text-left px-5 py-4 text-[10px] font-bold text-slate-600 active:bg-slate-100 flex items-center gap-3 transition-colors"
                   >
-                    <Navigation size={12} className="text-neda-orange shrink-0" />
+                    <div className="w-6 h-6 rounded-full bg-neda-lightOrange flex items-center justify-center shrink-0">
+                      <Navigation size={10} className="text-neda-orange" />
+                    </div>
                     <span className="truncate">{addr}</span>
                   </button>
                 ))}
               </div>
-            )}
+            </div>
           </div>
 
           <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100">
@@ -1025,9 +1030,9 @@ const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, status
                   
                   <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5">
                      <div className="flex items-center gap-1.5">
-                        <UserIcon size={10} className="text-slate-300" />
-                        <span className={`text-[9px] font-bold uppercase tracking-wider truncate max-w-[90px] ${isHeldByOthers ? 'text-orange-600' : 'text-slate-400'}`}>
-                          {isServiced ? 'Maintenance' : (isAvailable ? 'Warehouse' : (tool.currentHolderName || 'User'))}
+                        {isAvailable ? <Warehouse size={10} className="text-green-600" /> : <UserIcon size={10} className="text-slate-300" />}
+                        <span className={`text-[9px] font-bold uppercase tracking-wider truncate max-w-[90px] ${isAvailable ? 'text-green-600' : isHeldByOthers ? 'text-orange-600' : 'text-slate-400'}`}>
+                          {isServiced ? 'Maintenance' : (isAvailable ? 'In Warehouse' : (tool.currentHolderName || 'User'))}
                         </span>
                      </div>
                      <div className="flex items-center gap-1.5">

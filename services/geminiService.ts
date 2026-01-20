@@ -1,3 +1,4 @@
+
 import { GoogleGenAI } from "@google/genai";
 import { Tool } from "../types";
 
@@ -36,7 +37,6 @@ export const analyzeTools = async (tools: Tool[], query: string): Promise<string
       model: 'gemini-3-flash-preview',
       contents: prompt,
     });
-    // Property access for text as per guidelines
     return response.text || "Sorry, I couldn't analyze the data right now.";
   } catch (error) {
     console.error("Gemini Analysis Error:", error);
@@ -46,27 +46,25 @@ export const analyzeTools = async (tools: Tool[], query: string): Promise<string
 
 // Search for addresses using Google Maps grounding
 export const searchAddresses = async (query: string): Promise<string[]> => {
-  if (!query || query.length < 3) return [];
+  if (!query || query.trim().length < 3) return [];
   
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   try {
-    // Maps grounding is only supported in Gemini 2.5 series models
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
-      contents: `Find 5 real world construction site addresses or locations in New Zealand (or general addresses) matching: "${query}". Return only a list of the plain text addresses, one per line. No extra text.`,
+      contents: `Find 5 precise real-world street addresses or project locations in New Zealand (e.g. "123 Queen Street, Auckland") matching the prefix: "${query}". Return ONLY the list of addresses, one per line. Do not include any introductory text, numbers, or bullet points.`,
       config: {
         tools: [{ googleMaps: {} }],
       },
     });
 
-    // Property access for text as per guidelines
     const text = response.text || "";
-    // Clean up lines: remove numbering, empty lines, etc.
+    // Robust cleaning: remove Markdown list markers, numbered list prefixes, and trim whitespace
     return text
       .split('\n')
-      .map(line => line.replace(/^\d+\.\s*/, '').trim())
-      .filter(line => line.length > 5);
+      .map(line => line.replace(/^[\*\-\d\.]+\s*/, '').trim())
+      .filter(line => line.length > 8); // Ensure it looks like a reasonably long address
   } catch (error) {
     console.error("Address Search Error:", error);
     return [];
