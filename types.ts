@@ -55,8 +55,28 @@ export interface Tool {
 
 export type View = 'INVENTORY' | 'MY_TOOLS' | 'ADMIN_DASHBOARD' | 'AI_ASSISTANT';
 
-export const PERMISSIONS = {
-  [UserRole.USER]: ['book', 'return', 'view_inventory', 'ai_assistant'],
-  [UserRole.MANAGER]: ['book', 'return', 'view_inventory', 'ai_assistant', 'view_reports', 'view_all_bookings', 'manage_inventory', 'manage_users'],
-  [UserRole.ADMIN]: ['book', 'return', 'view_inventory', 'ai_assistant', 'view_reports', 'view_all_bookings', 'manage_inventory', 'manage_users']
+export const PERMISSIONS: Record<UserRole, string[]> = {
+  [UserRole.USER]: [
+    'view_inventory', 
+    'view_my_kit'
+  ],
+  [UserRole.MANAGER]: [
+    'book', 
+    'return', 
+    'view_inventory', 
+    'view_my_kit', 
+    'ai_assistant', 
+    'manage_inventory', 
+    'manage_users', 
+    'clear_service_alert'
+  ],
+  [UserRole.ADMIN]: [
+    'book', 
+    'return', 
+    'view_inventory', 
+    'view_my_kit', 
+    'ai_assistant', 
+    'manage_inventory', 
+    'manage_users'
+  ]
 };

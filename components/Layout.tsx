@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { 
   ClipboardList, 
@@ -6,7 +7,7 @@ import {
   Sparkles, 
   LogOut
 } from 'lucide-react';
-import { View, UserRole } from '../types';
+import { View, UserRole, PERMISSIONS } from '../types';
 
 export const LOGO_URL = "https://lirp.cdn-website.com/f1362e52/dms3rep/multi/opt/png_Primary-logo-navy-wording--no-bg-04029866-296w.png";
 
@@ -28,7 +29,9 @@ interface LayoutProps {
 }
 
 const Layout: React.FC<LayoutProps> = ({ activeView, setView, userRole, onLogout, children }) => {
-  const canSeeDashboard = userRole === UserRole.ADMIN || userRole === UserRole.MANAGER;
+  const userPermissions = PERMISSIONS[userRole] || [];
+  const canSeeDashboard = userPermissions.includes('manage_inventory') || userPermissions.includes('manage_users');
+  const canSeeAI = userPermissions.includes('ai_assistant');
 
   return (
     <div className="flex flex-col min-h-screen max-w-md mx-auto bg-white shadow-xl relative">
@@ -78,12 +81,14 @@ const Layout: React.FC<LayoutProps> = ({ activeView, setView, userRole, onLogout
             onClick={() => setView('ADMIN_DASHBOARD')} 
           />
         )}
-        <NavItem 
-          icon={<Sparkles size={22} />} 
-          label="Pulse-AI" 
-          active={activeView === 'AI_ASSISTANT'} 
-          onClick={() => setView('AI_ASSISTANT')} 
-        />
+        {canSeeAI && (
+          <NavItem 
+            icon={<Sparkles size={22} />} 
+            label="Pulse-AI" 
+            active={activeView === 'AI_ASSISTANT'} 
+            onClick={() => setView('AI_ASSISTANT')} 
+          />
+        )}
       </nav>
     </div>
   );

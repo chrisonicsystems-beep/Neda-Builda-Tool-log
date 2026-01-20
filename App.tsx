@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Tool, ToolStatus, User, UserRole, View, ToolLog } from './types';
+import { Tool, ToolStatus, User, UserRole, View, ToolLog, PERMISSIONS } from './types';
 import { INITIAL_USERS, INITIAL_TOOLS } from './mockData';
 import Layout, { NedaLogo, LOGO_URL } from './components/Layout';
 import { 
@@ -83,6 +83,11 @@ const App: React.FC = () => {
   const [showAddTool, setShowAddTool] = useState(false);
   const [returningTool, setReturningTool] = useState<Tool | null>(null);
   const [bookingTool, setBookingTool] = useState<Tool | null>(null);
+
+  const hasPermission = (permission: string) => {
+    if (!currentUser) return false;
+    return (PERMISSIONS[currentUser.role] || []).includes(permission);
+  };
 
   const loadData = async () => {
     try {
@@ -436,6 +441,7 @@ const App: React.FC = () => {
           showFilters={showFilters}
           setShowFilters={setShowFilters}
           currentUser={currentUser}
+          hasPermission={hasPermission}
           onInitiateBookOut={(t: Tool) => setBookingTool(t)}
           onInitiateReturn={(t: Tool) => setReturningTool(t)}
         />
@@ -454,6 +460,7 @@ const App: React.FC = () => {
           userRole={currentUser.role}
           currentUserId={currentUser.id}
           currentUserName={currentUser.name}
+          hasPermission={hasPermission}
         />
       )}
 
@@ -464,6 +471,7 @@ const App: React.FC = () => {
           // Use Case-insensitive comparison for ID lookup robustness
           tools={tools.filter(t => t.currentHolderId && String(t.currentHolderId).trim().toLowerCase() === String(currentUser.id).trim().toLowerCase())} 
           currentUser={currentUser} 
+          hasPermission={hasPermission}
           onInitiateReturn={(t: Tool) => setReturningTool(t)}
         />
       )}
@@ -489,11 +497,8 @@ const BookOutModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (tool
     if (value.trim().length >= 3) {
       setIsSearching(true);
       setHasAttemptedSearch(true);
-      // Faster debounce for more immediate feedback
       searchTimeoutRef.current = window.setTimeout(async () => {
         const results = await searchAddresses(value);
-        // We set suggestions even if empty to clear old ones, 
-        // but we don't clear them while we're still waiting for a response
         setSuggestions(results);
         setIsSearching(false);
       }, 350);
@@ -505,7 +510,6 @@ const BookOutModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (tool
   };
 
   const handleSelectSuggestion = (e: React.PointerEvent<HTMLButtonElement>, addr: string) => {
-    // pointerdown is more reliable on mobile to beat the focus/blur race
     e.preventDefault();
     setAddressInput(addr);
     setSuggestions([]);
@@ -542,7 +546,6 @@ const BookOutModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (tool
               )}
             </div>
             
-            {/* Show suggestions list if we have suggestions OR if we are still searching (keep old ones visible for continuity) */}
             {(suggestions.length > 0 || (hasAttemptedSearch && !isSearching)) && (
               <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden z-[720] max-h-[220px] overflow-y-auto hide-scrollbar">
                 {suggestions.length > 0 ? (
@@ -742,7 +745,7 @@ const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, users, isBiomet
   );
 };
 
-const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, statusFilter, setStatusFilter, showFilters, setShowFilters, currentUser, onInitiateBookOut, onInitiateReturn }) => (
+const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, statusFilter, setStatusFilter, showFilters, setShowFilters, currentUser, hasPermission, onInitiateBookOut, onInitiateReturn }) => (
   <div className="space-y-6">
     <div className="relative">
       <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
@@ -755,6 +758,10 @@ const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, status
         const isHeldByOthers = tool.status === ToolStatus.BOOKED_OUT && tool.currentHolderId && String(tool.currentHolderId).trim().toLowerCase() !== String(currentUser.id).trim().toLowerCase();
         const isAvailable = tool.status === ToolStatus.AVAILABLE;
         const isServiced = tool.status === ToolStatus.GETTING_SERVICED;
+        
+        const canBook = hasPermission('book');
+        const canReturn = hasPermission('return');
+
         return (
           <div key={tool.id} className="px-6 py-5 flex items-center justify-between hover:bg-slate-50 transition-colors">
             <div className="flex-1 min-w-0 pr-4">
@@ -768,7 +775,11 @@ const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, status
                  <div className="flex items-center gap-1.5"><MapPin size={10} className="text-slate-300" /><span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider truncate max-w-[110px]">{tool.currentSite || 'Warehouse'}</span></div>
               </div>
             </div>
-            {(isAvailable || isHeldByMe) && <button onClick={() => isAvailable ? onInitiateBookOut(tool) : onInitiateReturn(tool)} className={`shrink-0 px-4 py-2.5 rounded-xl font-black text-[9px] uppercase tracking-widest transition-all active:scale-95 shadow-md ${isAvailable ? 'bg-neda-navy text-white' : 'bg-white border border-neda-orange text-neda-orange'}`}>{isAvailable ? 'Book Out' : 'Return'}</button>}
+            {((canBook && isAvailable) || (canReturn && isHeldByMe)) && (
+              <button onClick={() => isAvailable ? onInitiateBookOut(tool) : onInitiateReturn(tool)} className={`shrink-0 px-4 py-2.5 rounded-xl font-black text-[9px] uppercase tracking-widest transition-all active:scale-95 shadow-md ${isAvailable ? 'bg-neda-navy text-white' : 'bg-white border border-neda-orange text-neda-orange'}`}>
+                {isAvailable ? 'Book Out' : 'Return'}
+              </button>
+            )}
             {isHeldByOthers && <div className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 text-slate-400 rounded-lg text-[8px] font-black uppercase border border-slate-100"><Clock size={10} />In Use</div>}
             {isServiced && <div className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-600 rounded-lg text-[8px] font-black uppercase border border-red-100"><Stethoscope size={10} />Service</div>}
           </div>
@@ -778,15 +789,19 @@ const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, status
   </div>
 );
 
-const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDeleteUser, onUpdateTool, onShowAddUser, onShowAddTool, onRepairData, userRole, currentUserId, currentUserName }) => {
+const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDeleteUser, onUpdateTool, onShowAddUser, onShowAddTool, onRepairData, userRole, currentUserId, currentUserName, hasPermission }) => {
   const [activeTab, setActiveTab] = useState<'USERS' | 'STOCKTAKE' | 'ACTIVE_BOOKINGS' | 'HEALTH'>('USERS');
   const bookedTools = useMemo(() => tools.filter((t: Tool) => t.status === ToolStatus.BOOKED_OUT), [tools]);
+  const servicedTools = useMemo(() => tools.filter((t: Tool) => t.status === ToolStatus.GETTING_SERVICED), [tools]);
   const unhealthyToolsCount = useMemo(() => tools.filter(t => (t.currentHolderName && !t.currentHolderId) || (t.currentHolderId && !t.currentHolderName) || (t.currentHolderId && t.status === ToolStatus.AVAILABLE)).length, [tools]);
+  
+  const canClearService = hasPermission('clear_service_alert');
+
   return (
     <div className="space-y-6">
       <div className="flex gap-4 border-b border-slate-100 pb-2 overflow-x-auto hide-scrollbar whitespace-nowrap">
         <button onClick={() => setActiveTab('USERS')} className={`pb-2 text-[10px] font-black uppercase tracking-widest ${activeTab === 'USERS' ? 'text-neda-orange border-b-2 border-neda-orange' : 'text-slate-400'}`}>Staff List</button>
-        <button onClick={() => setActiveTab('ACTIVE_BOOKINGS')} className={`pb-2 text-[10px] font-black uppercase tracking-widest ${activeTab === 'ACTIVE_BOOKINGS' ? 'text-neda-orange border-b-2 border-neda-orange' : 'text-slate-400'}`}>Bookings</button>
+        <button onClick={() => setActiveTab('ACTIVE_BOOKINGS')} className={`pb-2 text-[10px] font-black uppercase tracking-widest ${activeTab === 'ACTIVE_BOOKINGS' ? 'text-neda-orange border-b-2 border-neda-orange' : 'text-slate-400'}`}>Bookings / Service</button>
         <button onClick={() => setActiveTab('STOCKTAKE')} className={`pb-2 text-[10px] font-black uppercase tracking-widest ${activeTab === 'STOCKTAKE' ? 'text-neda-orange border-b-2 border-neda-orange' : 'text-slate-400'}`}>Assets</button>
         <button onClick={() => setActiveTab('HEALTH')} className={`pb-2 text-[10px] font-black uppercase tracking-widest ${activeTab === 'HEALTH' ? 'text-neda-orange border-b-2 border-neda-orange' : 'text-slate-400'}`}>Health {unhealthyToolsCount > 0 && <span className="bg-red-500 text-white px-1.5 py-0.5 rounded-full text-[7px] ml-1">{unhealthyToolsCount}</span>}</button>
       </div>
@@ -799,12 +814,29 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
         </div>
       )}
       {activeTab === 'ACTIVE_BOOKINGS' && (
-        <div className="space-y-4 animate-in fade-in">
+        <div className="space-y-6 animate-in fade-in">
           <div className="bg-white rounded-[2rem] border border-slate-100 overflow-hidden shadow-sm">
             <div className="px-6 py-4 bg-slate-50 border-b border-slate-100 flex justify-between items-center"><h4 className="text-[10px] font-black uppercase text-slate-400">Current Assignments</h4><span className="bg-neda-navy text-white text-[8px] font-black px-2 py-0.5 rounded-full">{bookedTools.length} Out</span></div>
             <div className="divide-y divide-slate-50">{bookedTools.length > 0 ? bookedTools.map((t: Tool) => (
               <div key={t.id} className="px-6 py-5 flex items-center justify-between"><div className="min-w-0 flex-1 pr-4"><p className="font-black text-neda-navy text-xs uppercase truncate">{t.name}</p><div className="flex flex-col gap-0.5 mt-1"><div className="flex items-center gap-1.5 text-slate-400"><UserIcon size={10} /><span className="text-[9px] font-bold uppercase">{t.currentHolderName || 'ID lookup required'}</span></div><div className="flex items-center gap-1.5 text-neda-orange"><MapPin size={10} /><span className="text-[9px] font-bold uppercase truncate">{t.currentSite}</span></div></div></div><button onClick={() => { if(window.confirm(`Force return ${t.name}?`)) onUpdateTool({...t, status: ToolStatus.AVAILABLE, currentHolderId: undefined, currentHolderName: undefined, currentSite: undefined, bookedAt: undefined}); }} className="shrink-0 p-2 text-slate-300 hover:text-red-500 transition-all"><RefreshCcw size={18} /></button></div>
             )) : <div className="px-6 py-12 text-center text-slate-300 font-black uppercase text-[10px]">No active bookings</div>}</div>
+          </div>
+
+          <div className="bg-red-50/50 rounded-[2rem] border border-red-100 overflow-hidden shadow-sm">
+            <div className="px-6 py-4 bg-red-100/30 border-b border-red-100 flex justify-between items-center"><h4 className="text-[10px] font-black uppercase text-red-600">Under Service</h4><span className="bg-red-600 text-white text-[8px] font-black px-2 py-0.5 rounded-full">{servicedTools.length} Items</span></div>
+            <div className="divide-y divide-red-50">{servicedTools.length > 0 ? servicedTools.map((t: Tool) => (
+              <div key={t.id} className="px-6 py-5 flex items-center justify-between">
+                <div className="min-w-0 flex-1 pr-4">
+                  <p className="font-black text-neda-navy text-xs uppercase truncate">{t.name}</p>
+                  <p className="text-[8px] font-bold text-red-400 uppercase tracking-widest mt-1">Requires Maintenance Clearance</p>
+                </div>
+                {canClearService ? (
+                  <button onClick={() => { if(window.confirm(`Mark ${t.name} as cleared and available?`)) onUpdateTool({...t, status: ToolStatus.AVAILABLE}); }} className="shrink-0 px-4 py-2 bg-green-500 text-white rounded-xl font-black text-[9px] uppercase tracking-widest shadow-md active:scale-95">Clear Service</button>
+                ) : (
+                  <div className="shrink-0 px-3 py-1.5 bg-red-100 text-red-400 rounded-lg text-[8px] font-black uppercase border border-red-200">Manager Only</div>
+                )}
+              </div>
+            )) : <div className="px-6 py-12 text-center text-slate-300 font-black uppercase text-[10px]">No items in service</div>}</div>
           </div>
         </div>
       )}
@@ -877,7 +909,7 @@ const AIAssistant: React.FC<any> = ({ tools }) => {
   );
 };
 
-const MyToolsView: React.FC<any> = ({ tools, currentUser, onInitiateReturn }) => (
+const MyToolsView: React.FC<any> = ({ tools, currentUser, hasPermission, onInitiateReturn }) => (
   <div className="space-y-6">
     <div className="bg-neda-navy p-10 rounded-[3rem] text-white shadow-2xl relative overflow-hidden">
        <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-16 -mt-16"></div>
@@ -891,21 +923,26 @@ const MyToolsView: React.FC<any> = ({ tools, currentUser, onInitiateReturn }) =>
           <p className="text-slate-300 font-black uppercase text-[10px] tracking-widest">No equipment linked to your ID</p>
         </div>
       ) : (
-        tools.map((tool: Tool) => (
-          <div key={tool.id} className="bg-white p-6 rounded-[2rem] border border-slate-100 flex flex-col shadow-sm animate-in slide-in-from-bottom-2">
-            <div className="flex justify-between items-start mb-4">
-              <div className="flex flex-col">
-                <span className="text-[8px] font-bold text-slate-300 uppercase mb-0.5 tracking-widest">{tool.category}</span>
-                <h3 className="font-black text-neda-navy uppercase text-sm">{tool.name}</h3>
+        tools.map((tool: Tool) => {
+          const canReturn = hasPermission('return');
+          return (
+            <div key={tool.id} className="bg-white p-6 rounded-[2rem] border border-slate-100 flex flex-col shadow-sm animate-in slide-in-from-bottom-2">
+              <div className="flex justify-between items-start mb-4">
+                <div className="flex flex-col">
+                  <span className="text-[8px] font-bold text-slate-300 uppercase mb-0.5 tracking-widest">{tool.category}</span>
+                  <h3 className="font-black text-neda-navy uppercase text-sm">{tool.name}</h3>
+                </div>
+                {canReturn && (
+                  <button onClick={() => onInitiateReturn(tool)} className="px-5 py-2.5 bg-slate-50 text-neda-orange rounded-xl font-black text-[10px] uppercase border border-neda-orange/10 transition-colors">Return</button>
+                )}
               </div>
-              <button onClick={() => onInitiateReturn(tool)} className="px-5 py-2.5 bg-slate-50 text-neda-orange rounded-xl font-black text-[10px] uppercase border border-neda-orange/10 transition-colors">Return</button>
+              <div className="mt-2 pt-4 border-t border-slate-50 flex items-center gap-2">
+                 <MapPin size={12} className="text-neda-orange" />
+                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest truncate">{tool.currentSite || 'Warehouse'}</span>
+              </div>
             </div>
-            <div className="mt-2 pt-4 border-t border-slate-50 flex items-center gap-2">
-               <MapPin size={12} className="text-neda-orange" />
-               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest truncate">{tool.currentSite || 'Warehouse'}</span>
-            </div>
-          </div>
-        ))
+          );
+        })
       )}
     </div>
   </div>
