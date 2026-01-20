@@ -53,7 +53,7 @@ const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [tools, setTools] = useState<Tool[]>([]);
   const [allUsers, setAllUsers] = useState<User[]>([]);
-  const [view, setView] = useState<View>('INVENTORY');
+  const [view, setView] = useState('INVENTORY') as any;
   const [isInitializing, setIsInitializing] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
@@ -576,7 +576,7 @@ const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, users, isBiomet
 
   const handleSignIn = (e: React.FormEvent) => {
     e.preventDefault();
-    const user = users.find(u => u.email.toLowerCase() === email.trim().toLowerCase());
+    const user = users.find((u: User) => u.email.toLowerCase() === email.trim().toLowerCase());
     if (user && user.password === password) {
       onLogin(user, rememberMe);
     } else {
@@ -737,9 +737,15 @@ const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, status
               <div className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-wider ${tool.status === ToolStatus.AVAILABLE ? 'bg-green-50 text-green-600' : 'bg-orange-50 text-orange-600'}`}>{tool.status.replace('_', ' ')}</div>
             </div>
             <div className="flex items-center justify-between pt-5 border-t border-slate-50">
-               <div className="flex flex-col">
-                  <span className="text-[8px] font-bold text-slate-300 uppercase tracking-widest mb-0.5">Current Holder</span>
-                  <span className="text-xs font-black text-slate-600 uppercase">{tool.currentHolderName || 'Warehouse'}</span>
+               <div className="flex gap-5">
+                  <div className="flex flex-col">
+                    <span className="text-[8px] font-bold text-slate-300 uppercase tracking-widest mb-0.5">Holder</span>
+                    <span className="text-[10px] font-black text-slate-600 uppercase truncate max-w-[80px]">{tool.currentHolderName || 'Warehouse'}</span>
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-[8px] font-bold text-slate-300 uppercase tracking-widest mb-0.5">Location</span>
+                    <span className="text-[10px] font-black text-slate-600 uppercase truncate max-w-[80px]">{tool.currentSite || 'Warehouse'}</span>
+                  </div>
                </div>
                {(tool.status === ToolStatus.AVAILABLE || (tool.status === ToolStatus.BOOKED_OUT && tool.currentHolderId === currentUser.id)) && (
                 <button onClick={() => handleAction(tool)} className="px-6 py-3 bg-neda-navy text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-neda-navy/10 active:scale-95 transition-all">{tool.status === ToolStatus.AVAILABLE ? 'Book Out' : 'Return'}</button>
@@ -889,7 +895,7 @@ const AIAssistant: React.FC<any> = ({ tools }) => {
     <div className="bg-white p-8 rounded-[3rem] shadow-sm border border-slate-100">
       <h2 className="text-2xl font-black text-neda-navy uppercase flex items-center gap-3 mb-8 tracking-tight"><Sparkles className="text-neda-orange" /> Pulse AI</h2>
       <div className="relative mb-6">
-        <input placeholder="How many drills are out?" className="w-full p-5 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-xs focus:ring-4 focus:ring-neda-navy/5 outline-none transition-all" value={query} onChange={e => setQuery(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && handleAsk()} />
+        <input placeholder="How many drills are out?" className="w-full p-5 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-xs focus:ring-4 focus:ring-neda-navy/5 outline-none transition-all" value={query} onChange={e => setQuery(e.target.value)} onKeyPress={(e: any) => e.key === 'Enter' && handleAsk()} />
         <button onClick={handleAsk} className="absolute right-2 top-2 p-3 bg-neda-navy text-white rounded-xl shadow-lg active:scale-95 transition-all">{loading ? <Loader2 className="animate-spin" size={18} /> : <Send size={18} />}</button>
       </div>
       {reply && <div className="p-6 bg-slate-50 rounded-2xl text-[12px] font-bold text-slate-700 leading-relaxed border border-slate-100 animate-in fade-in">{reply}</div>}
