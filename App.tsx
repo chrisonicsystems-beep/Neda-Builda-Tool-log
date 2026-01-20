@@ -41,7 +41,9 @@ import {
   EyeOff,
   Copy,
   PlusCircle,
-  Wrench
+  Wrench,
+  Camera,
+  MessageSquare
 } from 'lucide-react';
 import { analyzeTools, searchAddresses } from './services/geminiService';
 import { fetchTools, fetchUsers, syncTools, syncUsers, upsertSingleTool, upsertSingleUser, deleteSingleUser, supabase } from './services/supabaseService';
@@ -69,6 +71,7 @@ const App: React.FC = () => {
   // Modal states
   const [showAddUser, setShowAddUser] = useState(false);
   const [showAddTool, setShowAddTool] = useState(false);
+  const [returningTool, setReturningTool] = useState<Tool | null>(null);
 
   useEffect(() => {
     const initData = async () => {
@@ -215,6 +218,30 @@ const App: React.FC = () => {
     }
   };
 
+  const handleReturnTool = async (comment: string, photo?: string) => {
+    if (!returningTool || !currentUser) return;
+    
+    const updatedTool: Tool = {
+      ...returningTool,
+      status: ToolStatus.AVAILABLE,
+      currentHolderId: undefined,
+      currentHolderName: undefined,
+      bookedAt: undefined,
+      logs: [...(returningTool.logs || []), {
+        id: Math.random().toString(36).substr(2, 9),
+        userId: currentUser.id,
+        userName: currentUser.name,
+        action: 'RETURN',
+        timestamp: Date.now(),
+        comment: comment.trim(),
+        photo: photo
+      }]
+    };
+
+    setReturningTool(null);
+    await updateTool(updatedTool);
+  };
+
   const handleForgotPassword = async (email: string): Promise<string> => {
     const user = allUsers.find(u => u.email.toLowerCase() === email.trim().toLowerCase());
     if (!user) throw new Error(`Email "${email}" not found.`);
@@ -319,6 +346,13 @@ const App: React.FC = () => {
 
       {showAddUser && <AddUserModal onClose={() => setShowAddUser(false)} onSave={handleAddUser} />}
       {showAddTool && <AddToolModal onClose={() => setShowAddTool(false)} onSave={handleAddTool} />}
+      {returningTool && (
+        <ReturnToolModal 
+          tool={returningTool} 
+          onClose={() => setReturningTool(null)} 
+          onConfirm={handleReturnTool} 
+        />
+      )}
 
       {view === 'INVENTORY' && (
         <InventoryView 
@@ -331,6 +365,7 @@ const App: React.FC = () => {
           setShowFilters={setShowFilters}
           currentUser={currentUser}
           onUpdateTool={updateTool}
+          onInitiateReturn={(t: Tool) => setReturningTool(t)}
         />
       )}
 
@@ -354,13 +389,97 @@ const App: React.FC = () => {
           tools={tools.filter(t => t.currentHolderId === currentUser.id)} 
           currentUser={currentUser} 
           onUpdateTool={updateTool} 
+          onInitiateReturn={(t: Tool) => setReturningTool(t)}
         />
       )}
     </Layout>
   );
 };
 
-// --- Modals for Adding ---
+// --- Modals ---
+
+const ReturnToolModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (comment: string, photo?: string) => void }> = ({ tool, onClose, onConfirm }) => {
+  const [comment, setComment] = useState('');
+  const [photo, setPhoto] = useState<string | undefined>(undefined);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setPhoto(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[700] bg-neda-navy/90 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in">
+      <div className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 shadow-2xl animate-in zoom-in-95">
+        <div className="flex justify-between items-center mb-6">
+          <div className="flex flex-col">
+            <span className="text-[8px] font-black text-neda-orange uppercase tracking-widest mb-1">Confirm Return</span>
+            <h2 className="text-xl font-black text-neda-navy uppercase tracking-tight truncate max-w-[200px]">{tool.name}</h2>
+          </div>
+          <button onClick={onClose} className="p-2 text-slate-300 hover:text-neda-navy transition-colors"><X size={20} /></button>
+        </div>
+        
+        <div className="space-y-5">
+          <div className="space-y-1">
+            <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest pl-1">Condition/Comments</span>
+            <div className="relative">
+              <MessageSquare className="absolute left-4 top-4 text-slate-300" size={16} />
+              <textarea 
+                className="w-full p-4 pl-12 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-xs outline-none min-h-[100px] resize-none focus:ring-2 focus:ring-neda-navy/5 transition-all" 
+                placeholder="e.g. Needs service, all good, etc." 
+                value={comment} 
+                onChange={e => setComment(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest pl-1">Photo Documentation (Optional)</span>
+            <div 
+              onClick={() => fileInputRef.current?.click()}
+              className="w-full aspect-video bg-slate-50 border-2 border-dashed border-slate-100 rounded-2xl flex flex-col items-center justify-center cursor-pointer hover:bg-slate-100 transition-all overflow-hidden relative"
+            >
+              {photo ? (
+                <>
+                  <img src={photo} alt="Return Documentation" className="w-full h-full object-cover" />
+                  <div className="absolute inset-0 bg-black/20 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
+                    <Camera size={24} className="text-white" />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <Camera size={24} className="text-slate-200 mb-2" />
+                  <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest">Tap to capture photo</span>
+                </>
+              )}
+              <input 
+                type="file" 
+                ref={fileInputRef} 
+                accept="image/*" 
+                capture="environment" 
+                className="hidden" 
+                onChange={handlePhotoUpload} 
+              />
+            </div>
+          </div>
+
+          <button 
+            onClick={() => onConfirm(comment, photo)} 
+            className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-xl shadow-neda-navy/20 active:scale-95 transition-all"
+          >
+            Complete Return
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const AddUserModal: React.FC<{ onClose: () => void; onSave: (u: User) => void }> = ({ onClose, onSave }) => {
   const [formData, setFormData] = useState({
@@ -684,7 +803,7 @@ const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, users, isBiomet
   );
 };
 
-const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, statusFilter, setStatusFilter, showFilters, setShowFilters, currentUser, onUpdateTool }) => {
+const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, statusFilter, setStatusFilter, showFilters, setShowFilters, currentUser, onUpdateTool, onInitiateReturn }) => {
   const handleAction = (tool: Tool) => {
     if (tool.status === ToolStatus.AVAILABLE) {
       onUpdateTool({
@@ -702,26 +821,12 @@ const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, status
         }]
       });
     } else if (tool.status === ToolStatus.BOOKED_OUT && tool.currentHolderId === currentUser.id) {
-      onUpdateTool({
-        ...tool,
-        status: ToolStatus.AVAILABLE,
-        currentHolderId: undefined,
-        currentHolderName: undefined,
-        bookedAt: undefined,
-        logs: [...(tool.logs || []), {
-          id: Math.random().toString(36).substr(2, 9),
-          userId: currentUser.id,
-          userName: currentUser.name,
-          action: 'RETURN',
-          timestamp: Date.now()
-        }]
-      });
+      onInitiateReturn(tool);
     }
   };
 
   return (
     <div className="space-y-6">
-      {/* Search and Filters */}
       <div className="relative">
         <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
         <input 
@@ -739,7 +844,6 @@ const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, status
         </button>
       </div>
 
-      {/* Main List */}
       <div className="bg-white rounded-[2rem] border border-slate-100 overflow-hidden shadow-sm divide-y divide-slate-50">
         {tools.length > 0 ? (
           tools.map((tool: Tool) => (
@@ -942,7 +1046,7 @@ const AIAssistant: React.FC<any> = ({ tools }) => {
   );
 };
 
-const MyToolsView: React.FC<any> = ({ tools, currentUser, onUpdateTool }) => (
+const MyToolsView: React.FC<any> = ({ tools, currentUser, onUpdateTool, onInitiateReturn }) => (
   <div className="space-y-6">
     <div className="bg-neda-navy p-10 rounded-[3rem] text-white shadow-2xl relative overflow-hidden">
        <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-16 -mt-16"></div>
@@ -961,7 +1065,7 @@ const MyToolsView: React.FC<any> = ({ tools, currentUser, onUpdateTool }) => (
               <span className="text-[8px] font-bold text-slate-300 uppercase mb-0.5 tracking-widest">{tool.category}</span>
               <h3 className="font-black text-neda-navy uppercase text-sm tracking-tight">{tool.name}</h3>
             </div>
-            <button onClick={() => onUpdateTool({...tool, status: ToolStatus.AVAILABLE, currentHolderId: undefined, currentHolderName: undefined})} className="px-5 py-2.5 bg-slate-50 text-neda-orange rounded-xl font-black text-[10px] uppercase tracking-wider border border-neda-orange/10 hover:bg-neda-lightOrange transition-colors">Return</button>
+            <button onClick={() => onInitiateReturn(tool)} className="px-5 py-2.5 bg-slate-50 text-neda-orange rounded-xl font-black text-[10px] uppercase tracking-wider border border-neda-orange/10 hover:bg-neda-lightOrange transition-colors">Return</button>
           </div>
         ))
       )}
