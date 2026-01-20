@@ -53,13 +53,15 @@ import {
   ShieldCheck,
   Database,
   Activity,
-  Zap
+  Zap,
+  ChevronRight,
+  ListFilter,
+  CalendarDays
 } from 'lucide-react';
 import { analyzeTools, searchAddresses } from './services/geminiService';
 import { fetchTools, fetchUsers, syncTools, syncUsers, upsertSingleTool, upsertSingleUser, deleteSingleUser, supabase } from './services/supabaseService';
 
 const TEMP_PASSWORD_PREFIX = "NEDA-RESET-";
-const BIOMETRIC_ENROLLED_KEY = "neda_biometric_v1_";
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -75,7 +77,6 @@ const App: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<ToolStatus | 'ALL'>('ALL');
   const [showFilters, setShowFilters] = useState(false);
   
-  const [showBiometricEnrollment, setShowBiometricEnrollment] = useState(false);
   const [isBiometricSupported, setIsBiometricSupported] = useState(false);
 
   // Modal states
@@ -323,16 +324,17 @@ const App: React.FC = () => {
       currentSite: undefined,
       bookedAt: undefined,
       lastReturnedAt: Date.now(),
-      logs: [...(returningTool.logs || []), {
+      // Fix: Ensure the action property is strictly typed as 'RETURN' using as const
+      logs: [{
         id: Math.random().toString(36).substr(2, 9),
         userId: currentUser.id,
         userName: currentUser.name,
-        action: 'RETURN',
+        action: 'RETURN' as const,
         timestamp: Date.now(),
         comment: comment.trim(),
         condition: condition,
         photo: photo
-      }]
+      }, ...(returningTool.logs || [])].slice(0, 50)
     };
 
     setReturningTool(null);
@@ -349,14 +351,15 @@ const App: React.FC = () => {
       currentHolderName: currentUser.name,
       currentSite: siteAddress,
       bookedAt: Date.now(),
-      logs: [...(tool.logs || []), {
+      // Fix: Ensure the action property is strictly typed as 'BOOK_OUT' using as const
+      logs: [{
         id: Math.random().toString(36).substr(2, 9),
         userId: currentUser.id,
         userName: currentUser.name,
-        action: 'BOOK_OUT',
+        action: 'BOOK_OUT' as const,
         timestamp: Date.now(),
         site: siteAddress
-      }]
+      }, ...(tool.logs || [])].slice(0, 50)
     };
 
     setBookingTool(null);
@@ -461,7 +464,6 @@ const App: React.FC = () => {
       
       {view === 'MY_TOOLS' && (
         <MyToolsView 
-          // Use Case-insensitive comparison for ID lookup robustness
           tools={tools.filter(t => t.currentHolderId && String(t.currentHolderId).trim().toLowerCase() === String(currentUser.id).trim().toLowerCase())} 
           currentUser={currentUser} 
           onInitiateReturn={(t: Tool) => setReturningTool(t)}
@@ -489,12 +491,11 @@ const BookOutModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (tool
     if (value.trim().length >= 3) {
       setIsSearching(true);
       setHasAttemptedSearch(true);
-      // Snappier feedback (400ms instead of 600ms)
       searchTimeoutRef.current = window.setTimeout(async () => {
         const results = await searchAddresses(value);
         setSuggestions(results);
         setIsSearching(false);
-      }, 400);
+      }, 350);
     } else {
       setSuggestions([]);
       setIsSearching(false);
@@ -502,8 +503,7 @@ const BookOutModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (tool
     }
   };
 
-  const handleSelectSuggestion = (e: React.MouseEvent | React.TouchEvent, addr: string) => {
-    // Prevent blur before selection completes
+  const handleSelectSuggestion = (e: React.PointerEvent<HTMLButtonElement>, addr: string) => {
     e.preventDefault();
     setAddressInput(addr);
     setSuggestions([]);
@@ -521,13 +521,13 @@ const BookOutModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (tool
         </div>
         <div className="space-y-5">
           <div className="space-y-1 relative">
-            <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest pl-1">Site Address</span>
+            <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest pl-1">Site Address (NZ Only)</span>
             <div className="relative z-[710]">
               <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={16} />
               <input 
                 autoFocus 
                 type="text" 
-                placeholder="Start typing NZ address..." 
+                placeholder="Start typing street address..." 
                 className="w-full p-4 pl-12 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-xs outline-none focus:ring-2 focus:ring-neda-navy/5" 
                 value={addressInput} 
                 onChange={handleAddressChange} 
@@ -541,21 +541,22 @@ const BookOutModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (tool
             </div>
             
             {(suggestions.length > 0 || (hasAttemptedSearch && !isSearching)) && (
-              <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden z-[720] max-h-[200px] overflow-y-auto hide-scrollbar">
+              <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden z-[720] max-h-[220px] overflow-y-auto hide-scrollbar">
                 {suggestions.length > 0 ? (
                   suggestions.map((addr, idx) => (
                     <button 
                       key={idx} 
-                      onMouseDown={(e) => handleSelectSuggestion(e, addr)} 
-                      className="w-full text-left px-5 py-4 text-[10px] font-bold text-slate-600 hover:bg-slate-50 flex items-center gap-3 border-b border-slate-50 last:border-0"
+                      onPointerDown={(e) => handleSelectSuggestion(e, addr)} 
+                      className="w-full text-left px-5 py-4 text-[10px] font-bold text-slate-600 hover:bg-slate-50 flex items-center gap-3 border-b border-slate-50 last:border-0 active:bg-slate-100 transition-colors"
                     >
                       <Navigation size={10} className="text-neda-orange shrink-0" />
-                      <span className="truncate">{addr}</span>
+                      <span className="truncate leading-relaxed">{addr}</span>
                     </button>
                   ))
                 ) : !isSearching && hasAttemptedSearch && (
-                  <div className="px-5 py-6 text-center text-[9px] font-black text-slate-300 uppercase tracking-widest">
-                    No results found
+                  <div className="px-5 py-8 text-center flex flex-col items-center gap-2">
+                    <div className="bg-slate-50 p-3 rounded-full"><MapPin size={16} className="text-slate-200" /></div>
+                    <p className="text-[9px] font-black text-slate-300 uppercase tracking-[0.2em]">No addresses found nearby</p>
                   </div>
                 )}
               </div>
@@ -564,9 +565,9 @@ const BookOutModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (tool
           <button 
             disabled={addressInput.trim().length < 5} 
             onClick={() => onConfirm(tool, addressInput.trim())} 
-            className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all disabled:opacity-50"
+            className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all disabled:opacity-40 disabled:grayscale"
           >
-            Confirm Assignment
+            Confirm Site Assignment
           </button>
         </div>
       </div>
@@ -659,6 +660,94 @@ const AddToolModal: React.FC<{ onClose: () => void; onSave: (t: Tool) => void }>
   );
 };
 
+const AssetHistoryModal: React.FC<{ tool: Tool; onClose: () => void; onAddLog: (tool: Tool, log: ToolLog) => void; users: User[]; currentUser: User }> = ({ tool, onClose, onAddLog, users, currentUser }) => {
+  const [showAddLog, setShowAddLog] = useState(false);
+  const [newLog, setNewLog] = useState({ action: 'BOOK_OUT' as any, comment: '', userId: currentUser.id });
+
+  const lastLogs = useMemo(() => {
+    return (tool.logs || []).slice(0, 10);
+  }, [tool.logs]);
+
+  const handleManualLog = () => {
+    const matchedUser = users.find(u => u.id === newLog.userId);
+    const log: ToolLog = {
+      id: Math.random().toString(36).substr(2, 9),
+      userId: newLog.userId,
+      userName: matchedUser?.name || 'Unknown',
+      action: newLog.action,
+      timestamp: Date.now(),
+      comment: newLog.comment,
+    };
+    onAddLog(tool, log);
+    setShowAddLog(false);
+    setNewLog({ action: 'BOOK_OUT', comment: '', userId: currentUser.id });
+  };
+
+  return (
+    <div className="fixed inset-0 z-[750] bg-neda-navy/95 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-6 animate-in fade-in">
+      <div className="bg-white w-full max-w-lg h-[90vh] sm:h-auto sm:max-h-[85vh] rounded-t-[3rem] sm:rounded-[3rem] shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-10">
+        <div className="p-8 border-b border-slate-50 flex justify-between items-start shrink-0">
+          <div>
+            <span className="text-[8px] font-black text-neda-orange uppercase tracking-widest mb-1 block">Asset Timeline</span>
+            <h2 className="text-2xl font-black text-neda-navy uppercase tracking-tight leading-tight">{tool.name}</h2>
+            <p className="text-[10px] font-bold text-slate-400 uppercase mt-1">SN: {tool.serialNumber || 'N/A'}</p>
+          </div>
+          <button onClick={onClose} className="p-3 bg-slate-50 rounded-2xl text-slate-400 hover:text-neda-navy transition-all"><X size={24} /></button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-8 hide-scrollbar">
+          {showAddLog ? (
+            <div className="space-y-4 animate-in zoom-in-95">
+              <h3 className="text-xs font-black text-neda-navy uppercase tracking-widest mb-4">Add Manual Entry</h3>
+              <select className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm" value={newLog.action} onChange={e => setNewLog({...newLog, action: e.target.value as any})}>
+                <option value="BOOK_OUT">Book Out</option>
+                <option value="RETURN">Return</option>
+                <option value="CREATE">Maintenance/Note</option>
+              </select>
+              <select className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm" value={newLog.userId} onChange={e => setNewLog({...newLog, userId: e.target.value})}>
+                {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </select>
+              <textarea className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm min-h-[100px]" placeholder="Add context or notes..." value={newLog.comment} onChange={e => setNewLog({...newLog, comment: e.target.value})} />
+              <div className="flex gap-3 pt-2">
+                <button onClick={() => setShowAddLog(false)} className="flex-1 py-4 text-slate-400 text-[10px] font-black uppercase">Cancel</button>
+                <button onClick={handleManualLog} className="flex-[2] py-4 bg-neda-navy text-white rounded-2xl font-black uppercase shadow-xl">Commit Entry</button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-8">
+              <div className="flex justify-between items-center">
+                <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Activity Log</h3>
+                <button onClick={() => setShowAddLog(true)} className="flex items-center gap-2 px-4 py-2 bg-neda-navy/5 text-neda-navy rounded-xl font-black text-[9px] uppercase hover:bg-neda-navy hover:text-white transition-all"><Plus size={14} /> Manual Log</button>
+              </div>
+              
+              <div className="relative border-l-2 border-slate-100 ml-3 pl-8 space-y-10">
+                {lastLogs.length > 0 ? lastLogs.map((log, idx) => (
+                  <div key={log.id} className="relative group">
+                    <div className={`absolute -left-[41px] top-0 w-5 h-5 rounded-full border-4 border-white shadow-sm flex items-center justify-center ${log.action === 'BOOK_OUT' ? 'bg-orange-500' : log.action === 'RETURN' ? 'bg-green-500' : 'bg-slate-300'}`}></div>
+                    <div className="flex flex-col">
+                      <div className="flex justify-between items-start mb-1">
+                        <span className={`text-[8px] font-black uppercase tracking-widest ${log.action === 'BOOK_OUT' ? 'text-orange-600' : log.action === 'RETURN' ? 'text-green-600' : 'text-slate-500'}`}>
+                          {log.action.replace('_', ' ')}
+                        </span>
+                        <span className="text-[8px] font-black text-slate-300 uppercase">{new Date(log.timestamp).toLocaleDateString()}</span>
+                      </div>
+                      <p className="text-xs font-black text-neda-navy uppercase">{log.userName}</p>
+                      {log.site && <div className="flex items-center gap-1.5 mt-1 text-slate-400"><MapPin size={10} /><span className="text-[9px] font-bold uppercase truncate">{log.site}</span></div>}
+                      {log.comment && <p className="mt-2 p-3 bg-slate-50 rounded-xl text-[10px] font-medium text-slate-600 border border-slate-100 italic leading-relaxed">"{log.comment}"</p>}
+                    </div>
+                  </div>
+                )) : (
+                  <div className="py-10 text-center text-slate-300 font-black uppercase text-[10px] ml-[-32px]">No log entries yet</div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const MandatoryPasswordChange: React.FC<{ user: User; onUpdate: (u: User) => void }> = ({ user, onUpdate }) => {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -690,7 +779,7 @@ const MandatoryPasswordChange: React.FC<{ user: User; onUpdate: (u: User) => voi
 const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, users, isBiometricSupported }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [rememberMe, setRememberMe] = useState(true);
+  const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState('');
   const [showForgotModal, setShowForgotModal] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
@@ -710,7 +799,7 @@ const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, users, isBiomet
           <input type="password" placeholder="Password" required className="w-full bg-[#f8faff] border border-slate-100 rounded-2xl py-5 px-6 text-slate-700 font-bold text-center outline-none" value={password} onChange={(e) => setPassword(e.target.value)} />
           {error && <p className="text-red-500 text-[10px] font-black uppercase tracking-widest">{error}</p>}
           <div className="flex justify-between items-center px-2 mb-4">
-            <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={rememberMe} onChange={e => setRememberMe(e.target.checked)} className="w-4 h-4 rounded text-neda-navy" /><span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Signed In</span></label>
+            <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={rememberMe} onChange={e => setRememberMe(e.target.checked)} className="w-4 h-4 rounded text-neda-navy" /><span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Remember me</span></label>
             <button type="button" onClick={() => { setShowForgotModal(true); setTempPassResult(null); setError(''); }} className="text-neda-orange text-[10px] font-black uppercase tracking-widest">Forgot Key?</button>
           </div>
           <button type="submit" className="w-full bg-neda-navy text-white py-6 rounded-2xl font-black text-xl uppercase shadow-xl active:scale-95 transition-all">Sign In</button>
@@ -776,16 +865,40 @@ const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, status
 
 const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDeleteUser, onUpdateTool, onShowAddUser, onShowAddTool, onRepairData, userRole, currentUserId, currentUserName }) => {
   const [activeTab, setActiveTab] = useState<'USERS' | 'STOCKTAKE' | 'ACTIVE_BOOKINGS' | 'HEALTH'>('USERS');
+  const [selectedToolForHistory, setSelectedToolForHistory] = useState<Tool | null>(null);
+  const [assetSearch, setAssetSearch] = useState('');
+
   const bookedTools = useMemo(() => tools.filter((t: Tool) => t.status === ToolStatus.BOOKED_OUT), [tools]);
   const unhealthyToolsCount = useMemo(() => tools.filter(t => (t.currentHolderName && !t.currentHolderId) || (t.currentHolderId && !t.currentHolderName) || (t.currentHolderId && t.status === ToolStatus.AVAILABLE)).length, [tools]);
+  
+  const filteredAssets = useMemo(() => {
+    return tools.filter(t => t.name.toLowerCase().includes(assetSearch.toLowerCase()) || (t.serialNumber || '').toLowerCase().includes(assetSearch.toLowerCase()));
+  }, [tools, assetSearch]);
+
+  const handleAddLogToTool = async (tool: Tool, log: ToolLog) => {
+    const updatedTool = { ...tool, logs: [log, ...(tool.logs || [])].slice(0, 50) };
+    await onUpdateTool(updatedTool);
+  };
+
   return (
     <div className="space-y-6">
+      {selectedToolForHistory && (
+        <AssetHistoryModal 
+          tool={selectedToolForHistory} 
+          users={allUsers}
+          currentUser={allUsers.find(u => u.id === currentUserId)!}
+          onClose={() => setSelectedToolForHistory(null)} 
+          onAddLog={handleAddLogToTool}
+        />
+      )}
+
       <div className="flex gap-4 border-b border-slate-100 pb-2 overflow-x-auto hide-scrollbar whitespace-nowrap">
         <button onClick={() => setActiveTab('USERS')} className={`pb-2 text-[10px] font-black uppercase tracking-widest ${activeTab === 'USERS' ? 'text-neda-orange border-b-2 border-neda-orange' : 'text-slate-400'}`}>Staff List</button>
         <button onClick={() => setActiveTab('ACTIVE_BOOKINGS')} className={`pb-2 text-[10px] font-black uppercase tracking-widest ${activeTab === 'ACTIVE_BOOKINGS' ? 'text-neda-orange border-b-2 border-neda-orange' : 'text-slate-400'}`}>Bookings</button>
         <button onClick={() => setActiveTab('STOCKTAKE')} className={`pb-2 text-[10px] font-black uppercase tracking-widest ${activeTab === 'STOCKTAKE' ? 'text-neda-orange border-b-2 border-neda-orange' : 'text-slate-400'}`}>Assets</button>
         <button onClick={() => setActiveTab('HEALTH')} className={`pb-2 text-[10px] font-black uppercase tracking-widest ${activeTab === 'HEALTH' ? 'text-neda-orange border-b-2 border-neda-orange' : 'text-slate-400'}`}>Health {unhealthyToolsCount > 0 && <span className="bg-red-500 text-white px-1.5 py-0.5 rounded-full text-[7px] ml-1">{unhealthyToolsCount}</span>}</button>
       </div>
+
       {activeTab === 'USERS' && (
         <div className="space-y-4 animate-in fade-in">
           <button onClick={onShowAddUser} className="w-full flex items-center justify-between p-6 bg-slate-50 border border-dashed border-slate-200 rounded-[2rem] hover:bg-slate-100 transition-colors"><div className="flex items-center gap-4"><div className="w-12 h-12 rounded-2xl bg-white flex items-center justify-center text-neda-navy shadow-sm"><UserPlus size={24} /></div><div className="text-left"><h4 className="font-black text-neda-navy uppercase text-xs">Onboard Staff</h4><p className="text-[8px] font-bold text-slate-400 uppercase">Create profile</p></div></div><PlusCircle size={24} className="text-neda-orange" /></button>
@@ -794,6 +907,7 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
           ))}</div>
         </div>
       )}
+
       {activeTab === 'ACTIVE_BOOKINGS' && (
         <div className="space-y-4 animate-in fade-in">
           <div className="bg-white rounded-[2rem] border border-slate-100 overflow-hidden shadow-sm">
@@ -804,6 +918,34 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
           </div>
         </div>
       )}
+
+      {activeTab === 'STOCKTAKE' && (
+        <div className="space-y-4 animate-in fade-in">
+          <button onClick={onShowAddTool} className="w-full flex items-center justify-between p-6 bg-slate-50 border border-dashed border-slate-200 rounded-[2rem] hover:bg-slate-100 transition-colors"><div className="flex items-center gap-4"><div className="w-12 h-12 rounded-2xl bg-white flex items-center justify-center text-neda-navy shadow-sm"><Package size={24} /></div><div className="text-left"><h4 className="font-black text-neda-navy uppercase text-xs">Register Asset</h4><p className="text-[8px] font-bold text-slate-400 uppercase">Add to inventory</p></div></div><PlusCircle size={24} className="text-neda-orange" /></button>
+          
+          <div className="relative">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+            <input type="text" placeholder="Filter inventory..." className="w-full pl-10 pr-4 py-3 bg-white border border-slate-100 rounded-2xl font-bold text-[10px] outline-none shadow-sm uppercase tracking-widest" value={assetSearch} onChange={e => setAssetSearch(e.target.value)} />
+          </div>
+
+          <div className="grid gap-3">
+            {filteredAssets.map(tool => (
+              <div key={tool.id} onClick={() => setSelectedToolForHistory(tool)} className="bg-white p-5 rounded-[2rem] border border-slate-100 flex items-center justify-between shadow-sm active:scale-[0.98] transition-all cursor-pointer">
+                <div className="flex-1 min-w-0">
+                  <span className="text-[7px] font-black text-slate-300 uppercase tracking-widest mb-1 block">{tool.category}</span>
+                  <h4 className="font-black text-neda-navy text-sm uppercase truncate pr-4">{tool.name}</h4>
+                  <div className="flex items-center gap-3 mt-1.5">
+                    <div className="flex items-center gap-1 px-1.5 py-0.5 bg-slate-50 rounded-md"><History size={8} className="text-slate-400" /><span className="text-[8px] font-black text-slate-400 uppercase">{(tool.logs || []).length} Entries</span></div>
+                    <span className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded-md ${tool.status === ToolStatus.AVAILABLE ? 'bg-green-50 text-green-600' : 'bg-orange-50 text-orange-600'}`}>{tool.status.replace('_', ' ')}</span>
+                  </div>
+                </div>
+                <ChevronRight size={18} className="text-slate-200 shrink-0" />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {activeTab === 'HEALTH' && (
         <div className="space-y-6 animate-in fade-in">
           <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm relative overflow-hidden">

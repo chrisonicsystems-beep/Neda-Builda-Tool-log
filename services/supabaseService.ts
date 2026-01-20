@@ -48,6 +48,7 @@ const mapToolToDb = (tool: Tool) => {
     status: tool.status || ToolStatus.AVAILABLE,
     current_holder_id: tool.currentHolderId || null,
     current_holder_name: tool.currentHolderName || null,
+    // Fix: Remove tool.current_site as it doesn't exist on Tool type. Use tool.currentSite.
     current_site: tool.currentSite || null,
     main_photo: tool.mainPhoto || null,
     notes: (tool.notes === undefined || tool.notes === null) ? '' : String(tool.notes),
@@ -55,7 +56,8 @@ const mapToolToDb = (tool: Tool) => {
     number_of_items: tool.numberOfItems || 1,
     serial_number: tool.serialNumber || '',
     booked_at: tool.bookedAt || null,
-    last_returned_at: tool.lastReturnedAt || null
+    last_returned_at: tool.lastReturnedAt || null,
+    logs: tool.logs || [] // Persist logs as JSONB
   };
 };
 
@@ -74,7 +76,7 @@ const mapDbToTool = (dbTool: any): Tool => ({
   notes: dbTool.notes || '',
   dateOfPurchase: dbTool.date_of_purchase || undefined,
   numberOfItems: dbTool.number_of_items || 1,
-  logs: dbTool.logs || []
+  logs: Array.isArray(dbTool.logs) ? dbTool.logs : []
 });
 
 export const upsertSingleTool = async (tool: Tool) => {

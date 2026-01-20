@@ -53,9 +53,11 @@ export const searchAddresses = async (query: string): Promise<string[]> => {
     // We use gemini-2.5-flash as it supports googleMaps grounding
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
-      contents: `Search for real-world street addresses in New Zealand that start with or match: "${query}". 
-      Return a plain list of the 5 most likely full addresses. 
-      Important: Return ONLY the address strings, one per line. No bullets, no numbers, no explanations.`,
+      contents: `Act as a high-precision New Zealand address locator. 
+      Find real street addresses in New Zealand that strictly start with or are highly relevant to the prefix: "${query}".
+      Focus on active construction sites, residential, or commercial areas.
+      Return exactly 5 unique full addresses.
+      Format: Plain text only, one address per line. No bullets, no numbers, no markdown formatting, no introductory text.`,
       config: {
         tools: [{ googleMaps: {} }],
       },
@@ -63,49 +65,41 @@ export const searchAddresses = async (query: string): Promise<string[]> => {
 
     const text = response.text || "";
     
-    // Improved parsing to handle markdown, numbers, or extra text
+    // resilient parsing for lines
     const lines = text.split('\n');
     const addresses = lines
       .map(line => {
-        // Remove markdown bullets (*, -) and numbered list patterns (1., 1) )
+        // Strip out common list artifacts (dots, numbers, dashes, asterisks)
         let cleaned = line.replace(/^[\*\-\s\d\.\)]+/, '').trim();
-        // Remove any trailing punctuation if it looks like a list
-        cleaned = cleaned.replace(/[,;]$/, '').trim();
+        // Remove trailing punctuation
+        cleaned = cleaned.replace(/[.,;]$/, '').trim();
         return cleaned;
       })
       .filter(line => {
-        // NZ addresses are usually at least "number street, suburb, city" length
-        return line.length > 10 && (line.toLowerCase().includes('nz') || line.toLowerCase().includes('new zealand') || line.split(',').length >= 2);
+        // Ensure it's a substantive string and looks like an address (usually has a space for number/street)
+        return line.length > 8 && line.includes(' ');
       });
 
-    if (addresses.length > 0) return addresses.slice(0, 5);
+    if (addresses.length > 0) {
+      // Return top 5, ensuring they are unique
+      return Array.from(new Set(addresses)).slice(0, 5);
+    }
     
-    // If text parsing failed but we have grounding metadata, let's try to extract from there
-    const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
+    // Fallback: Check grounding metadata if direct text parsing yields nothing
+    // Fix: Explicitly cast groundingChunks to any[] to avoid 'unknown[]' vs 'string[]' mismatch
+    const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks as any[] | undefined;
     if (chunks && chunks.length > 0) {
        const chunkAddresses = chunks
          .map((c: any) => c.maps?.title || c.web?.title)
-         .filter((t: string) => t && t.length > 10)
+         // Fix: Use type guard to ensure t is a string for the resulting array
+         .filter((t: any): t is string => typeof t === 'string' && t.length > 8)
          .slice(0, 5);
-       if (chunkAddresses.length > 0) return chunkAddresses;
+       if (chunkAddresses.length > 0) return Array.from(new Set(chunkAddresses));
     }
     
-    throw new Error("No addresses parsed from model output.");
+    return [];
   } catch (error) {
-    console.error("Address Search Error, trying fallback:", error);
-    // If Maps tool fails or doesn't return useful data, try a basic model call as fallback
-    try {
-      const fallbackResponse = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: `List 5 real street addresses in New Zealand starting with "${query}". 
-        Be very specific. Format: text only, one full address per line. No numbers or bullets.`
-      });
-      return (fallbackResponse.text || "")
-        .split('\n')
-        .map(l => l.replace(/^[\*\-\s\d\.\)]+/, '').trim())
-        .filter(l => l.length > 10);
-    } catch {
-      return [];
-    }
+    console.error("Address Search API Error:", error);
+    return [];
   }
 };
