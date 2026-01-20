@@ -19,18 +19,13 @@ const cleanPayload = (obj: any) => {
   );
 };
 
-// Core columns guaranteed to exist in a standard setup
-const mapUserToCoreDb = (user: User) => cleanPayload({
+// Map User for writing to Database
+const mapUserToDb = (user: User) => cleanPayload({
   id: user.id,
   name: user.name,
   role: user.role,
   email: user.email,
-  password: user.password
-});
-
-// Optional columns that might be missing in custom schemas
-const mapUserToMetadataDb = (user: User) => cleanPayload({
-  id: user.id,
+  password: user.password,
   is_enabled: user.isEnabled,
   must_change_password: user.mustChangePassword
 });
@@ -41,8 +36,8 @@ const mapDbToUser = (dbUser: any): User => ({
   role: dbUser.role,
   email: dbUser.email,
   password: dbUser.password,
-  isEnabled: dbUser.is_enabled !== undefined ? dbUser.is_enabled : true,
-  mustChangePassword: dbUser.must_change_password || false
+  isEnabled: dbUser.is_enabled !== undefined ? dbUser.is_enabled : (dbUser.isEnabled !== undefined ? dbUser.isEnabled : true),
+  mustChangePassword: dbUser.must_change_password || dbUser.mustChangePassword || false
 });
 
 const mapToolToDb = (tool: Tool) => {
@@ -68,17 +63,17 @@ const mapDbToTool = (dbTool: any): Tool => ({
   id: dbTool.id,
   name: dbTool.equipment_tool || dbTool.tool_name || dbTool.name || 'Unnamed Asset',
   category: dbTool.equipment_type || dbTool.category || 'General',
-  serialNumber: dbTool.serial_number || '', 
+  serialNumber: dbTool.serial_number || dbTool.serialNumber || '', 
   status: (dbTool.status as ToolStatus) || ToolStatus.AVAILABLE,
-  currentHolderId: dbTool.current_holder_id,
-  currentHolderName: dbTool.current_holder_name,
-  currentSite: dbTool.current_site,
-  bookedAt: dbTool.booked_at,
-  lastReturnedAt: dbTool.last_returned_at,
-  mainPhoto: dbTool.main_photo,
+  currentHolderId: dbTool.current_holder_id || dbTool.currentHolderId,
+  currentHolderName: dbTool.current_holder_name || dbTool.currentHolderName,
+  currentSite: dbTool.current_site || dbTool.currentSite,
+  bookedAt: dbTool.booked_at || dbTool.bookedAt,
+  lastReturnedAt: dbTool.last_returned_at || dbTool.lastReturnedAt,
+  mainPhoto: dbTool.main_photo || dbTool.mainPhoto,
   notes: dbTool.notes || '',
-  dateOfPurchase: dbTool.date_of_purchase,
-  numberOfItems: dbTool.number_of_items,
+  dateOfPurchase: dbTool.date_of_purchase || dbTool.dateOfPurchase,
+  numberOfItems: dbTool.number_of_items || dbTool.numberOfItems,
   logs: dbTool.logs || []
 });
 
@@ -88,35 +83,35 @@ export const upsertSingleTool = async (tool: Tool) => {
   if (error) throw error;
 };
 
-/**
- * Upserts a user using a 'Core-First' strategy.
- * 1. Saves mandatory core data (ID, Name, Email, Role, Password).
- * 2. Attempts to save metadata (isEnabled, mustChangePassword) as a secondary step.
- */
 export const upsertSingleUser = async (user: User) => {
   if (!supabase) return;
   
-  // Step 1: Save Core Data (Mandatory)
-  const { error: coreError } = await supabase
-    .from('users')
-    .upsert(mapUserToCoreDb(user), { onConflict: 'id' });
+  // Strategy: Try full mapping (including metadata) first.
+  // This ensures isEnabled and mustChangePassword are saved if columns exist.
+  const fullData = mapUserToDb(user);
   
-  if (coreError) {
-    console.error("Core User Sync Failed:", coreError.message);
-    throw new Error(`Database Error: ${coreError.message}`);
-  }
-
-  // Step 2: Try Metadata (Optional - will not throw if columns are missing)
-  try {
-    const { error: metaError } = await supabase
-      .from('users')
-      .upsert(mapUserToMetadataDb(user), { onConflict: 'id' });
+  const { error: fullError } = await supabase
+    .from('users')
+    .upsert(fullData, { onConflict: 'id' });
+  
+  if (fullError) {
+    console.warn("Full user upsert failed, attempting core fallback:", fullError.message);
+    // Fallback: Try only mandatory fields in case table schema is strict or missing columns
+    const coreData = cleanPayload({
+      id: user.id,
+      name: user.name,
+      role: user.role,
+      email: user.email,
+      password: user.password
+    });
     
-    if (metaError) {
-      console.warn("Metadata sync skipped:", metaError.message);
+    const { error: coreError } = await supabase
+      .from('users')
+      .upsert(coreData, { onConflict: 'id' });
+    
+    if (coreError) {
+      throw new Error(`Critical User Sync Error: ${coreError.message}`);
     }
-  } catch (err) {
-    console.warn("Silent failure updating user metadata:", err);
   }
 };
 
@@ -141,10 +136,11 @@ export const fetchTools = async (): Promise<Tool[] | null> => {
 };
 
 export const syncUsers = async (users: User[]) => {
-  if (!supabase) return;
-  // Use core mapping for initial sync to be safe
-  const { error } = await supabase.from('users').upsert(users.map(mapUserToCoreDb), { onConflict: 'id' });
-  if (error) throw error;
+  if (!supabase || users.length === 0) return;
+  // Batch sync users
+  for (const user of users) {
+    await upsertSingleUser(user).catch(err => console.error("Batch User Sync Error:", err));
+  }
 };
 
 export const fetchUsers = async (): Promise<User[] | null> => {

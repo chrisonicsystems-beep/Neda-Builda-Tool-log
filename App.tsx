@@ -92,12 +92,19 @@ const App: React.FC = () => {
       let finalUsers = remoteUsers && remoteUsers.length > 0 ? remoteUsers : INITIAL_USERS;
       let finalTools = remoteTools && remoteTools.length > 0 ? remoteTools : INITIAL_TOOLS;
 
-      // Auto-reconciliation: Fix holder names in local state for immediate visual consistency
+      // Deep Reconciliation: ensure holder names match the actual users in the database
+      // This is crucial for fixing bulk uploads where only holder_id was provided
       finalTools = finalTools.map(tool => {
         if (tool.currentHolderId) {
-          const matchedUser = finalUsers.find(u => String(u.id) === String(tool.currentHolderId));
-          if (matchedUser && tool.currentHolderName !== matchedUser.name) {
-            return { ...tool, currentHolderName: matchedUser.name };
+          const matchedUser = finalUsers.find(u => String(u.id).trim() === String(tool.currentHolderId).trim());
+          if (matchedUser) {
+            // Found a user! Sync name and ensure status is logical
+            return { 
+              ...tool, 
+              currentHolderName: matchedUser.name,
+              // If it has a holder, it shouldn't be 'AVAILABLE'
+              status: tool.status === ToolStatus.AVAILABLE ? ToolStatus.BOOKED_OUT : tool.status
+            };
           }
         }
         return tool;
@@ -148,28 +155,47 @@ const App: React.FC = () => {
     setIsSyncing(true);
     let repairedCount = 0;
     try {
-      // Find tools that have a holder ID but missing name OR incorrect status
-      const toolsToRepair = tools.filter(t => 
+      // Re-fetch to get freshest data before repair
+      const result = await loadData();
+      if (!result) throw new Error("Could not reload data for repair.");
+
+      const { finalUsers, finalTools } = result;
+
+      // Identify problematic records: 
+      // 1. Holder ID exists but Name is missing or 'None'
+      // 2. Holder ID exists but tool is marked as 'AVAILABLE'
+      const toolsToRepair = finalTools.filter(t => 
         (t.currentHolderId && (!t.currentHolderName || t.currentHolderName === 'None' || t.currentHolderName === '')) ||
         (t.currentHolderId && t.status === ToolStatus.AVAILABLE)
       );
       
       if (toolsToRepair.length === 0) {
-        setSyncSuccess("All data is currently healthy.");
+        setSyncSuccess("Inventory records are consistent.");
         setTimeout(() => setSyncSuccess(null), 3000);
         return;
       }
 
       for (const tool of toolsToRepair) {
-        const user = allUsers.find(u => String(u.id) === String(tool.currentHolderId));
+        const user = finalUsers.find(u => String(u.id).trim() === String(tool.currentHolderId).trim());
         if (user) {
           const updatedTool: Tool = { 
             ...tool, 
             currentHolderName: user.name,
-            // Force status to BOOKED_OUT if it has a holder, unless it was specifically flagged defective/serviced
-            status: tool.status === ToolStatus.AVAILABLE ? ToolStatus.BOOKED_OUT : tool.status
+            status: (tool.status === ToolStatus.AVAILABLE) ? ToolStatus.BOOKED_OUT : tool.status
           };
           await upsertSingleTool(updatedTool);
+          repairedCount++;
+        } else {
+          // Assigned to a non-existent user? Reset to Warehouse
+          console.warn(`Tool ${tool.name} assigned to non-existent user ${tool.currentHolderId}. Resetting.`);
+          const resetTool: Tool = {
+            ...tool,
+            status: ToolStatus.AVAILABLE,
+            currentHolderId: undefined,
+            currentHolderName: undefined,
+            currentSite: undefined
+          };
+          await upsertSingleTool(resetTool);
           repairedCount++;
         }
       }
@@ -178,7 +204,7 @@ const App: React.FC = () => {
       setSyncSuccess(`Success! Reconciled ${repairedCount} equipment records.`);
       setTimeout(() => setSyncSuccess(null), 5000);
     } catch (e: any) {
-      setSyncError("Repair failed: " + e.message);
+      setSyncError("Data Repair Error: " + e.message);
     } finally {
       setIsSyncing(false);
     }
@@ -209,10 +235,10 @@ const App: React.FC = () => {
         setCurrentUser(updatedUser);
         localStorage.setItem('et_user', JSON.stringify(updatedUser));
       }
-      setSyncSuccess(`Profile updated.`);
+      setSyncSuccess(`Staff profile updated.`);
       setTimeout(() => setSyncSuccess(null), 3000);
     } catch (e: any) {
-      setSyncError(e.message);
+      setSyncError("Update Failed: " + e.message);
     } finally {
       setIsSyncing(false);
     }
@@ -223,10 +249,10 @@ const App: React.FC = () => {
     try {
       await upsertSingleUser(newUser);
       setAllUsers(prev => [...prev, newUser]);
-      setSyncSuccess(`User added.`);
+      setSyncSuccess(`Staff member added.`);
       setShowAddUser(false);
     } catch (e: any) {
-      setSyncError(e.message);
+      setSyncError("Add Failed: " + e.message);
     } finally {
       setIsSyncing(false);
     }
@@ -237,10 +263,10 @@ const App: React.FC = () => {
     try {
       await upsertSingleTool(newTool);
       setTools(prev => [...prev, newTool]);
-      setSyncSuccess(`Asset registered.`);
+      setSyncSuccess(`Asset registered successfully.`);
       setShowAddTool(false);
     } catch (e: any) {
-      setSyncError(e.message);
+      setSyncError("Asset Error: " + e.message);
     } finally {
       setIsSyncing(false);
     }
@@ -248,7 +274,7 @@ const App: React.FC = () => {
 
   const handleDeleteUser = async (userToDelete: User) => {
     if (!currentUser) return;
-    const confirmed = window.confirm(`Delete ${userToDelete.name}?`);
+    const confirmed = window.confirm(`Permanently remove ${userToDelete.name} from the system?`);
     if (!confirmed) return;
 
     setIsSyncing(true);
@@ -257,7 +283,7 @@ const App: React.FC = () => {
       setAllUsers(prev => prev.filter(u => u.id !== userToDelete.id));
       setSyncSuccess(`User removed.`);
     } catch (e: any) {
-      setSyncError(e.message);
+      setSyncError("Deletion Error: " + e.message);
     } finally {
       setIsSyncing(false);
     }
@@ -268,9 +294,9 @@ const App: React.FC = () => {
     try {
       await upsertSingleTool(updatedTool);
       setTools(prev => prev.map(t => t.id === updatedTool.id ? updatedTool : t));
-      setSyncSuccess(`Updated.`);
+      setSyncSuccess(`Saved.`);
     } catch (e: any) {
-      setSyncError(e.message);
+      setSyncError("Sync Error: " + e.message);
     } finally {
       setIsSyncing(false);
     }
@@ -334,7 +360,7 @@ const App: React.FC = () => {
 
   const handleForgotPassword = async (email: string): Promise<string> => {
     const user = allUsers.find(u => u.email.toLowerCase() === email.trim().toLowerCase());
-    if (!user) throw new Error(`Email "${email}" not found.`);
+    if (!user) throw new Error(`Staff email "${email}" not found.`);
 
     const tempPass = TEMP_PASSWORD_PREFIX + Math.floor(1000 + Math.random() * 9000);
     const updatedUser = { ...user, password: tempPass, mustChangePassword: true };
@@ -355,7 +381,7 @@ const App: React.FC = () => {
     if (!currentUser) return;
     localStorage.setItem(BIOMETRIC_ENROLLED_KEY + currentUser.email, "true");
     setShowBiometricEnrollment(false);
-    setSyncSuccess("Biometrics Enabled");
+    setSyncSuccess("Pulse Face/Touch ID Enabled");
     setTimeout(() => setSyncSuccess(null), 3000);
   };
 
@@ -398,7 +424,7 @@ const App: React.FC = () => {
         {isSyncing && (
           <div className="bg-neda-navy text-white px-4 py-3 rounded-2xl shadow-lg flex items-center justify-center gap-3 animate-in slide-in-from-top-4">
             <Loader2 className="animate-spin" size={16} />
-            <span className="text-[10px] font-black uppercase tracking-widest text-chrisonic-cyan">Writing to Database...</span>
+            <span className="text-[10px] font-black uppercase tracking-widest text-chrisonic-cyan">Updating Database...</span>
           </div>
         )}
         {syncSuccess && (
@@ -456,7 +482,8 @@ const App: React.FC = () => {
       
       {view === 'MY_TOOLS' && (
         <MyToolsView 
-          tools={tools.filter(t => String(t.currentHolderId) === String(currentUser.id))} 
+          // Resilient filtering: handles both ID types (string/number) from bulk uploads
+          tools={tools.filter(t => t.currentHolderId && String(t.currentHolderId).trim() === String(currentUser.id).trim())} 
           currentUser={currentUser} 
           onInitiateReturn={(t: Tool) => setReturningTool(t)}
         />
@@ -718,8 +745,8 @@ const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, status
     </div>
     <div className="bg-white rounded-[2rem] border border-slate-100 overflow-hidden shadow-sm divide-y divide-slate-50">
       {tools.length > 0 ? tools.map((tool: Tool) => {
-        const isHeldByMe = tool.status === ToolStatus.BOOKED_OUT && String(tool.currentHolderId) === String(currentUser.id);
-        const isHeldByOthers = tool.status === ToolStatus.BOOKED_OUT && String(tool.currentHolderId) !== String(currentUser.id);
+        const isHeldByMe = tool.status === ToolStatus.BOOKED_OUT && tool.currentHolderId && String(tool.currentHolderId).trim() === String(currentUser.id).trim();
+        const isHeldByOthers = tool.status === ToolStatus.BOOKED_OUT && tool.currentHolderId && String(tool.currentHolderId).trim() !== String(currentUser.id).trim();
         const isAvailable = tool.status === ToolStatus.AVAILABLE;
         const isServiced = tool.status === ToolStatus.GETTING_SERVICED;
         return (
@@ -749,8 +776,11 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
   const [activeTab, setActiveTab] = useState<'USERS' | 'STOCKTAKE' | 'ACTIVE_BOOKINGS' | 'HEALTH'>('USERS');
   const servicedTools = useMemo(() => tools.filter((t: Tool) => t.status === ToolStatus.GETTING_SERVICED), [tools]);
   const bookedTools = useMemo(() => tools.filter((t: Tool) => t.status === ToolStatus.BOOKED_OUT), [tools]);
-  const healthyTools = useMemo(() => tools.filter(t => !t.currentHolderId || (t.currentHolderId && t.currentHolderName && t.currentHolderName !== 'None' && t.status === ToolStatus.BOOKED_OUT)), [tools]);
-  const unhealthyToolsCount = tools.length - healthyTools.length;
+  const healthyToolsCount = useMemo(() => tools.filter(t => 
+    (!t.currentHolderId && t.status !== ToolStatus.BOOKED_OUT) || 
+    (t.currentHolderId && t.currentHolderName && t.currentHolderName !== 'None' && t.status !== ToolStatus.AVAILABLE)
+  ).length, [tools]);
+  const unhealthyToolsCount = tools.length - healthyToolsCount;
 
   return (
     <div className="space-y-6">
@@ -758,7 +788,7 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
         <button onClick={() => setActiveTab('USERS')} className={`pb-2 text-[10px] font-black uppercase tracking-widest ${activeTab === 'USERS' ? 'text-neda-orange border-b-2 border-neda-orange' : 'text-slate-400'}`}>Staff</button>
         <button onClick={() => setActiveTab('ACTIVE_BOOKINGS')} className={`pb-2 text-[10px] font-black uppercase tracking-widest ${activeTab === 'ACTIVE_BOOKINGS' ? 'text-neda-orange border-b-2 border-neda-orange' : 'text-slate-400'}`}>Bookings</button>
         <button onClick={() => setActiveTab('STOCKTAKE')} className={`pb-2 text-[10px] font-black uppercase tracking-widest ${activeTab === 'STOCKTAKE' ? 'text-neda-orange border-b-2 border-neda-orange' : 'text-slate-400'}`}>Assets</button>
-        <button onClick={() => setActiveTab('HEALTH')} className={`pb-2 text-[10px] font-black uppercase tracking-widest ${activeTab === 'HEALTH' ? 'text-neda-orange border-b-2 border-neda-orange' : 'text-slate-400'}`}>Database {unhealthyToolsCount > 0 && <span className="bg-red-500 text-white px-1.5 py-0.5 rounded-full text-[7px] ml-1">{unhealthyToolsCount}</span>}</button>
+        <button onClick={() => setActiveTab('HEALTH')} className={`pb-2 text-[10px] font-black uppercase tracking-widest ${activeTab === 'HEALTH' ? 'text-neda-orange border-b-2 border-neda-orange' : 'text-slate-400'}`}>Health {unhealthyToolsCount > 0 && <span className="bg-red-500 text-white px-1.5 py-0.5 rounded-full text-[7px] ml-1">{unhealthyToolsCount}</span>}</button>
       </div>
 
       {activeTab === 'USERS' && (
@@ -800,11 +830,11 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
         <div className="space-y-6 animate-in fade-in">
           <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm relative overflow-hidden">
              <div className="relative z-10">
-                <h3 className="text-xl font-black text-neda-navy uppercase mb-2">Database Reconciler</h3>
-                <p className="text-[10px] font-bold text-slate-400 uppercase leading-relaxed mb-8 max-w-[240px]">This utility resolves bulk-upload issues where equipment assignments exist but holder names or statuses are out of sync with staff records.</p>
+                <h3 className="text-xl font-black text-neda-navy uppercase mb-2">Database Integrity</h3>
+                <p className="text-[10px] font-bold text-slate-400 uppercase leading-relaxed mb-8 max-w-[240px]">This utility reconciles tool assignments with the staff list. It fixes missing holder names and ensures tool statuses are consistent with their assigned locations.</p>
                 <button onClick={onRepairData} className="flex items-center gap-4 px-6 py-5 bg-neda-navy text-chrisonic-cyan rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl active:scale-95 transition-all">
                    <Zap size={20} className="text-neda-orange" />
-                   Fix Missing Assignments
+                   Repair Assignments
                 </button>
              </div>
              <div className="absolute -right-4 -bottom-4 opacity-5 text-neda-navy"><Database size={160} /></div>
@@ -817,15 +847,15 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
              </div>
              {unhealthyToolsCount > 0 ? (
                 <div className="space-y-2">
-                   {tools.filter(t => t.currentHolderId && (!t.currentHolderName || t.currentHolderName === 'None' || t.currentHolderName === '' || t.status === ToolStatus.AVAILABLE)).map(t => (
+                   {tools.filter(t => (t.currentHolderId && (!t.currentHolderName || t.currentHolderName === 'None' || t.currentHolderName === '' || t.status === ToolStatus.AVAILABLE))).map(t => (
                       <div key={t.id} className="bg-white px-4 py-3 rounded-xl border border-red-100 flex items-center justify-between shadow-sm animate-pulse">
                          <div className="flex flex-col">
                             <span className="text-[11px] font-black text-neda-navy uppercase">{t.name}</span>
-                            <span className="text-[8px] font-bold text-red-400 uppercase">Mismatch Detected</span>
+                            <span className="text-[8px] font-bold text-red-400 uppercase">Inconsistency Detected</span>
                          </div>
                          <div className="flex flex-col items-end">
-                            <span className="text-[9px] font-black text-slate-400">ID: {t.currentHolderId}</span>
-                            <span className="text-[9px] font-black text-slate-400">Name: {t.currentHolderName || 'MISSING'}</span>
+                            <span className="text-[9px] font-black text-slate-400">Holder ID: {t.currentHolderId}</span>
+                            <span className="text-[9px] font-black text-slate-400">Name: {t.currentHolderName || 'EMPTY'}</span>
                          </div>
                       </div>
                    ))}
