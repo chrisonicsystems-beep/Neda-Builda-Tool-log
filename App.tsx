@@ -45,7 +45,8 @@ import {
   Camera,
   MessageSquare,
   ClipboardCheck,
-  Stethoscope
+  Stethoscope,
+  Navigation
 } from 'lucide-react';
 import { analyzeTools, searchAddresses } from './services/geminiService';
 import { fetchTools, fetchUsers, syncTools, syncUsers, upsertSingleTool, upsertSingleUser, deleteSingleUser, supabase } from './services/supabaseService';
@@ -74,6 +75,7 @@ const App: React.FC = () => {
   const [showAddUser, setShowAddUser] = useState(false);
   const [showAddTool, setShowAddTool] = useState(false);
   const [returningTool, setReturningTool] = useState<Tool | null>(null);
+  const [bookingTool, setBookingTool] = useState<Tool | null>(null);
 
   useEffect(() => {
     const initData = async () => {
@@ -234,6 +236,7 @@ const App: React.FC = () => {
       status: newStatus,
       currentHolderId: undefined,
       currentHolderName: undefined,
+      currentSite: undefined,
       bookedAt: undefined,
       logs: [...(returningTool.logs || []), {
         id: Math.random().toString(36).substr(2, 9),
@@ -248,6 +251,30 @@ const App: React.FC = () => {
     };
 
     setReturningTool(null);
+    await updateTool(updatedTool);
+  };
+
+  const handleConfirmBookOut = async (tool: Tool, siteAddress: string) => {
+    if (!currentUser) return;
+    
+    const updatedTool: Tool = {
+      ...tool,
+      status: ToolStatus.BOOKED_OUT,
+      currentHolderId: currentUser.id,
+      currentHolderName: currentUser.name,
+      currentSite: siteAddress,
+      bookedAt: Date.now(),
+      logs: [...(tool.logs || []), {
+        id: Math.random().toString(36).substr(2, 9),
+        userId: currentUser.id,
+        userName: currentUser.name,
+        action: 'BOOK_OUT',
+        timestamp: Date.now(),
+        site: siteAddress
+      }]
+    };
+
+    setBookingTool(null);
     await updateTool(updatedTool);
   };
 
@@ -362,6 +389,13 @@ const App: React.FC = () => {
           onConfirm={handleReturnTool} 
         />
       )}
+      {bookingTool && (
+        <BookOutModal
+          tool={bookingTool}
+          onClose={() => setBookingTool(null)}
+          onConfirm={handleConfirmBookOut}
+        />
+      )}
 
       {view === 'INVENTORY' && (
         <InventoryView 
@@ -373,7 +407,7 @@ const App: React.FC = () => {
           showFilters={showFilters}
           setShowFilters={setShowFilters}
           currentUser={currentUser}
-          onUpdateTool={updateTool}
+          onInitiateBookOut={(t: Tool) => setBookingTool(t)}
           onInitiateReturn={(t: Tool) => setReturningTool(t)}
         />
       )}
@@ -398,7 +432,6 @@ const App: React.FC = () => {
         <MyToolsView 
           tools={tools.filter(t => t.currentHolderId === currentUser.id)} 
           currentUser={currentUser} 
-          onUpdateTool={updateTool} 
           onInitiateReturn={(t: Tool) => setReturningTool(t)}
         />
       )}
@@ -407,6 +440,113 @@ const App: React.FC = () => {
 };
 
 // --- Modals ---
+
+const BookOutModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (tool: Tool, siteAddress: string) => void }> = ({ tool, onClose, onConfirm }) => {
+  const [addressInput, setAddressInput] = useState('');
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const searchTimeoutRef = useRef<number | null>(null);
+
+  const handleAddressChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setAddressInput(value);
+
+    if (searchTimeoutRef.current) {
+      window.clearTimeout(searchTimeoutRef.current);
+    }
+
+    if (value.length > 3) {
+      setIsSearching(true);
+      searchTimeoutRef.current = window.setTimeout(async () => {
+        const results = await searchAddresses(value);
+        setSuggestions(results);
+        setIsSearching(false);
+      }, 500);
+    } else {
+      setSuggestions([]);
+      setIsSearching(false);
+    }
+  };
+
+  const handleSelectSuggestion = (addr: string) => {
+    setAddressInput(addr);
+    setSuggestions([]);
+  };
+
+  const handleConfirm = () => {
+    if (addressInput.trim().length < 5) return;
+    onConfirm(tool, addressInput.trim());
+  };
+
+  return (
+    <div className="fixed inset-0 z-[700] bg-neda-navy/90 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in">
+      <div className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 shadow-2xl animate-in zoom-in-95">
+        <div className="flex justify-between items-center mb-6">
+          <div className="flex flex-col">
+            <span className="text-[8px] font-black text-neda-orange uppercase tracking-widest mb-1">Book Out Equipment</span>
+            <h2 className="text-xl font-black text-neda-navy uppercase tracking-tight truncate max-w-[200px]">{tool.name}</h2>
+          </div>
+          <button onClick={onClose} className="p-2 text-slate-300 hover:text-neda-navy transition-colors"><X size={20} /></button>
+        </div>
+
+        <div className="space-y-5">
+          <div className="space-y-1 relative">
+            <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest pl-1">Destination Site Address</span>
+            <div className="relative">
+              <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={16} />
+              <input 
+                autoFocus
+                type="text"
+                placeholder="Search or enter address..."
+                className="w-full p-4 pl-12 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-xs outline-none focus:ring-2 focus:ring-neda-navy/5 transition-all"
+                value={addressInput}
+                onChange={handleAddressChange}
+              />
+              {isSearching && (
+                <div className="absolute right-4 top-1/2 -translate-y-1/2">
+                  <Loader2 className="animate-spin text-neda-orange" size={14} />
+                </div>
+              )}
+            </div>
+
+            {suggestions.length > 0 && (
+              <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden z-50 animate-in slide-in-from-top-2">
+                {suggestions.map((addr, idx) => (
+                  <button 
+                    key={idx}
+                    onClick={() => handleSelectSuggestion(addr)}
+                    className="w-full text-left px-5 py-3 text-[10px] font-bold text-slate-600 hover:bg-slate-50 border-b border-slate-50 last:border-0 flex items-center gap-3 transition-colors"
+                  >
+                    <Navigation size={12} className="text-neda-orange shrink-0" />
+                    <span className="truncate">{addr}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100">
+             <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center text-neda-navy shadow-sm"><Info size={16} /></div>
+                <div>
+                   <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Note</p>
+                   <p className="text-[9px] font-bold text-slate-600 leading-tight">Assets are tracked in real-time. Ensure the site address is correct for project reporting.</p>
+                </div>
+             </div>
+          </div>
+
+          <button 
+            disabled={addressInput.trim().length < 5}
+            onClick={handleConfirm} 
+            className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-xl shadow-neda-navy/20 active:scale-95 transition-all disabled:opacity-50 disabled:grayscale"
+          >
+            Confirm Assignment
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const ReturnToolModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (comment: string, condition: string, photo?: string) => void }> = ({ tool, onClose, onConfirm }) => {
   const [comment, setComment] = useState('');
@@ -827,23 +967,10 @@ const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, users, isBiomet
   );
 };
 
-const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, statusFilter, setStatusFilter, showFilters, setShowFilters, currentUser, onUpdateTool, onInitiateReturn }) => {
+const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, statusFilter, setStatusFilter, showFilters, setShowFilters, currentUser, onInitiateBookOut, onInitiateReturn }) => {
   const handleAction = (tool: Tool) => {
     if (tool.status === ToolStatus.AVAILABLE) {
-      onUpdateTool({
-        ...tool,
-        status: ToolStatus.BOOKED_OUT,
-        currentHolderId: currentUser.id,
-        currentHolderName: currentUser.name,
-        bookedAt: Date.now(),
-        logs: [...(tool.logs || []), {
-          id: Math.random().toString(36).substr(2, 9),
-          userId: currentUser.id,
-          userName: currentUser.name,
-          action: 'BOOK_OUT',
-          timestamp: Date.now()
-        }]
-      });
+      onInitiateBookOut(tool);
     } else if (tool.status === ToolStatus.BOOKED_OUT && tool.currentHolderId === currentUser.id) {
       onInitiateReturn(tool);
     }
@@ -1130,7 +1257,7 @@ const AIAssistant: React.FC<any> = ({ tools }) => {
   );
 };
 
-const MyToolsView: React.FC<any> = ({ tools, currentUser, onUpdateTool, onInitiateReturn }) => (
+const MyToolsView: React.FC<any> = ({ tools, currentUser, onInitiateReturn }) => (
   <div className="space-y-6">
     <div className="bg-neda-navy p-10 rounded-[3rem] text-white shadow-2xl relative overflow-hidden">
        <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-16 -mt-16"></div>
@@ -1144,12 +1271,19 @@ const MyToolsView: React.FC<any> = ({ tools, currentUser, onUpdateTool, onInitia
         </div>
       ) : (
         tools.map((tool: Tool) => (
-          <div key={tool.id} className="bg-white p-6 rounded-[2rem] border border-slate-100 flex justify-between items-center shadow-sm">
-            <div className="flex flex-col">
-              <span className="text-[8px] font-bold text-slate-300 uppercase mb-0.5 tracking-widest">{tool.category}</span>
-              <h3 className="font-black text-neda-navy uppercase text-sm tracking-tight">{tool.name}</h3>
+          <div key={tool.id} className="bg-white p-6 rounded-[2rem] border border-slate-100 flex flex-col shadow-sm">
+            <div className="flex justify-between items-start mb-4">
+              <div className="flex flex-col">
+                <span className="text-[8px] font-bold text-slate-300 uppercase mb-0.5 tracking-widest">{tool.category}</span>
+                <h3 className="font-black text-neda-navy uppercase text-sm tracking-tight">{tool.name}</h3>
+              </div>
+              <button onClick={() => onInitiateReturn(tool)} className="px-5 py-2.5 bg-slate-50 text-neda-orange rounded-xl font-black text-[10px] uppercase tracking-wider border border-neda-orange/10 hover:bg-neda-lightOrange transition-colors">Return</button>
             </div>
-            <button onClick={() => onInitiateReturn(tool)} className="px-5 py-2.5 bg-slate-50 text-neda-orange rounded-xl font-black text-[10px] uppercase tracking-wider border border-neda-orange/10 hover:bg-neda-lightOrange transition-colors">Return</button>
+            
+            <div className="mt-2 pt-4 border-t border-slate-50 flex items-center gap-2">
+               <MapPin size={12} className="text-neda-orange" />
+               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest truncate">{tool.currentSite || 'Warehouse'}</span>
+            </div>
           </div>
         ))
       )}
