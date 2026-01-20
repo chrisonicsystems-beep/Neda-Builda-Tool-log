@@ -59,7 +59,8 @@ import {
   CalendarDays,
   ChevronUp,
   ArrowUpAz,
-  ArrowDownAz
+  ArrowDownAz,
+  Shield
 } from 'lucide-react';
 import { analyzeTools, searchAddresses } from './services/geminiService';
 import { fetchTools, fetchUsers, syncTools, syncUsers, upsertSingleTool, upsertSingleUser, deleteSingleUser, supabase } from './services/supabaseService';
@@ -267,7 +268,7 @@ const App: React.FC = () => {
         setCurrentUser(updatedUser);
         localStorage.setItem('et_user', JSON.stringify(updatedUser));
       }
-      setSyncSuccess(`Profile updated.`);
+      setSyncSuccess(`User profile updated.`);
       setTimeout(() => setSyncSuccess(null), 3000);
     } catch (e: any) {
       setSyncError("Update Failed: " + e.message);
@@ -568,6 +569,70 @@ const App: React.FC = () => {
 };
 
 // --- Modals & Views ---
+
+const EditUserModal: React.FC<{ user: User; onClose: () => void; onSave: (u: User) => void; isCurrentUser: boolean }> = ({ user, onClose, onSave, isCurrentUser }) => {
+  const [formData, setFormData] = useState({ 
+    name: user.name, 
+    email: user.email, 
+    password: user.password || '', 
+    role: user.role,
+    isEnabled: user.isEnabled
+  });
+  const [showPass, setShowPass] = useState(false);
+  
+  return (
+    <div className="fixed inset-0 z-[700] bg-neda-navy/95 backdrop-blur-md flex items-center justify-center p-6 animate-in fade-in">
+      <div className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 shadow-2xl animate-in zoom-in-95">
+        <div className="flex justify-between items-center mb-8">
+          <div>
+            <h2 className="text-xl font-black text-neda-navy uppercase leading-tight">Edit Staff</h2>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">ID: {user.id}</p>
+          </div>
+          <button onClick={onClose} className="p-2 text-slate-300 hover:text-neda-navy"><X size={20} /></button>
+        </div>
+        <form onSubmit={e => { e.preventDefault(); onSave({ ...user, ...formData }); onClose(); }} className="space-y-4">
+          <div className="space-y-1">
+            <span className="text-[8px] font-black text-slate-400 uppercase tracking-[0.2em] pl-1">Full Name</span>
+            <input required className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
+          </div>
+          <div className="space-y-1">
+            <span className="text-[8px] font-black text-slate-400 uppercase tracking-[0.2em] pl-1">Email</span>
+            <input required type="email" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} />
+          </div>
+          <div className="space-y-1">
+            <span className="text-[8px] font-black text-slate-400 uppercase tracking-[0.2em] pl-1">Role & Permissions</span>
+            <select 
+              disabled={isCurrentUser}
+              className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm disabled:opacity-50" 
+              value={formData.role} 
+              onChange={e => setFormData({...formData, role: e.target.value as UserRole})}
+            >
+              <option value={UserRole.USER}>User</option>
+              <option value={UserRole.MANAGER}>Manager</option>
+              <option value={UserRole.ADMIN}>Admin</option>
+            </select>
+          </div>
+          <div className="space-y-1">
+            <span className="text-[8px] font-black text-slate-400 uppercase tracking-[0.2em] pl-1">Access Password</span>
+            <div className="relative">
+              <input 
+                required 
+                type={showPass ? "text" : "password"} 
+                className="w-full p-4 pr-12 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm" 
+                value={formData.password} 
+                onChange={e => setFormData({...formData, password: e.target.value})} 
+              />
+              <button type="button" onClick={() => setShowPass(!showPass)} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400">
+                {showPass ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
+          </div>
+          <button type="submit" className="w-full mt-4 py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all">Save Changes</button>
+        </form>
+      </div>
+    </div>
+  );
+};
 
 const ToolDetailModal: React.FC<{ tool: Tool; onClose: () => void; onAddLog: (tool: Tool, log: ToolLog) => void; users: User[]; currentUser: User }> = ({ tool, onClose, onAddLog, users, currentUser }) => {
   const [showAddLog, setShowAddLog] = useState(false);
@@ -1050,25 +1115,84 @@ const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, status
 const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDeleteUser, onUpdateTool, onShowAddUser, onShowAddTool, onRepairData, onDownloadCSV, userRole, currentUserId, onViewDetail }) => {
   const [activeTab, setActiveTab] = useState<'USERS' | 'STOCKTAKE' | 'ACTIVE_BOOKINGS' | 'HEALTH'>('USERS');
   const [assetSearch, setAssetSearch] = useState('');
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+  
   const bookedTools = useMemo(() => tools.filter((t: Tool) => t.status === ToolStatus.BOOKED_OUT), [tools]);
   const unhealthyToolsCount = useMemo(() => tools.filter(t => (t.currentHolderName && !t.currentHolderId) || (t.currentHolderId && !t.currentHolderName)).length, [tools]);
   const filteredAssets = useMemo(() => tools.filter(t => t.name.toLowerCase().includes(assetSearch.toLowerCase())), [tools, assetSearch]);
+  
   return (
     <div className="space-y-6">
+      {editingUser && (
+        <EditUserModal 
+          user={editingUser} 
+          isCurrentUser={editingUser.id === currentUserId}
+          onClose={() => setEditingUser(null)} 
+          onSave={onUpdateUser} 
+        />
+      )}
       <div className="flex gap-4 border-b border-slate-100 pb-2 overflow-x-auto hide-scrollbar whitespace-nowrap">
         <button onClick={() => setActiveTab('USERS')} className={`pb-2 text-[10px] font-black uppercase tracking-widest ${activeTab === 'USERS' ? 'text-neda-orange border-b-2 border-neda-orange' : 'text-slate-400'}`}>Staff List</button>
         <button onClick={() => setActiveTab('ACTIVE_BOOKINGS')} className={`pb-2 text-[10px] font-black uppercase tracking-widest ${activeTab === 'ACTIVE_BOOKINGS' ? 'text-neda-orange border-b-2 border-neda-orange' : 'text-slate-400'}`}>Bookings</button>
         <button onClick={() => setActiveTab('STOCKTAKE')} className={`pb-2 text-[10px] font-black uppercase tracking-widest ${activeTab === 'STOCKTAKE' ? 'text-neda-orange border-b-2 border-neda-orange' : 'text-slate-400'}`}>Assets</button>
         <button onClick={() => setActiveTab('HEALTH')} className={`pb-2 text-[10px] font-black uppercase tracking-widest ${activeTab === 'HEALTH' ? 'text-neda-orange border-b-2 border-neda-orange' : 'text-slate-400'}`}>Health {unhealthyToolsCount > 0 && <span className="bg-red-500 text-white px-1.5 py-0.5 rounded-full text-[7px] ml-1">{unhealthyToolsCount}</span>}</button>
       </div>
+      
       {activeTab === 'USERS' && (
         <div className="space-y-4 animate-in fade-in">
-          <button onClick={onShowAddUser} className="w-full flex items-center justify-between p-6 bg-slate-50 border border-dashed border-slate-200 rounded-[2rem]"><div className="flex items-center gap-4"><div className="w-12 h-12 rounded-2xl bg-white flex items-center justify-center shadow-sm"><UserPlus size={24} /></div><div className="text-left"><h4 className="font-black text-neda-navy uppercase text-xs">Onboard Staff</h4></div></div><PlusCircle size={24} className="text-neda-orange" /></button>
-          <div className="grid gap-3">{allUsers.map((user: User) => (
-            <div key={user.id} className="bg-white p-5 rounded-[2rem] border border-slate-100 flex items-center justify-between shadow-sm"><div className="flex items-center gap-4"><div className="w-12 h-12 rounded-2xl bg-slate-50 flex items-center justify-center"><UserIcon className="text-slate-400" size={20} /></div><div><h4 className="font-black text-neda-navy text-sm">{user.name}</h4><p className="text-[9px] font-bold text-slate-400 uppercase">{user.role}</p></div></div>{user.id !== currentUserId && <button onClick={() => onDeleteUser(user)} className="p-2 text-slate-300 hover:text-red-500"><Trash2 size={18} /></button>}</div>
-          ))}</div>
+          <button onClick={onShowAddUser} className="w-full flex items-center justify-between p-6 bg-slate-50 border border-dashed border-slate-200 rounded-[2rem] hover:bg-slate-100 transition-colors">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-white flex items-center justify-center shadow-sm text-neda-orange"><UserPlus size={24} /></div>
+              <div className="text-left"><h4 className="font-black text-neda-navy uppercase text-xs">Onboard Staff</h4></div>
+            </div>
+            <PlusCircle size={24} className="text-neda-orange" />
+          </button>
+          
+          <div className="grid gap-3">
+            {allUsers.map((user: User) => (
+              <div key={user.id} className="bg-white p-5 rounded-[2rem] border border-slate-100 shadow-sm">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-2xl bg-slate-50 flex items-center justify-center text-slate-400">
+                      <UserIcon size={20} />
+                    </div>
+                    <div>
+                      <h4 className="font-black text-neda-navy text-sm uppercase tracking-tight">{user.name}</h4>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded ${user.role === UserRole.ADMIN ? 'bg-red-50 text-red-600' : user.role === UserRole.MANAGER ? 'bg-neda-lightOrange text-neda-orange' : 'bg-slate-50 text-slate-500'}`}>
+                          {user.role}
+                        </span>
+                        {user.id === currentUserId && <span className="text-[8px] font-black text-slate-300 uppercase italic">(You)</span>}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => setEditingUser(user)} className="p-2 text-neda-navy hover:bg-slate-50 rounded-xl transition-colors">
+                      <Edit size={18} />
+                    </button>
+                    {user.id !== currentUserId && (
+                      <button onClick={() => onDeleteUser(user)} className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors">
+                        <Trash2 size={18} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div className="px-1 flex flex-col gap-1">
+                  <div className="flex items-center gap-2 text-[9px] font-bold text-slate-400 uppercase tracking-widest">
+                    <Mail size={10} className="shrink-0" /> {user.email}
+                  </div>
+                  {userRole === UserRole.ADMIN && (
+                    <div className="flex items-center gap-2 text-[9px] font-bold text-slate-300 uppercase tracking-widest">
+                      <Shield size={10} className="shrink-0" /> Access: {user.isEnabled ? 'Active' : 'Locked'}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
+      
       {activeTab === 'ACTIVE_BOOKINGS' && (
         <div className="space-y-4">
           <div className="flex justify-between items-center px-4">
