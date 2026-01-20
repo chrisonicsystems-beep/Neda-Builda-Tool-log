@@ -51,13 +51,18 @@ export const searchAddresses = async (query: string): Promise<string[]> => {
   
   try {
     // We use gemini-2.5-flash as it supports googleMaps grounding
+    // Aggressive prompt to ensure we get narrowing results for NZ addresses
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
-      contents: `Act as a high-precision New Zealand address locator. 
-      Find real street addresses in New Zealand that strictly start with or are highly relevant to the prefix: "${query}".
-      Focus on active construction sites, residential, or commercial areas.
-      Return exactly 5 unique full addresses.
-      Format: Plain text only, one address per line. No bullets, no numbers, no markdown formatting, no introductory text.`,
+      contents: `Perform a REAL-TIME street address search for New Zealand. 
+      The user has typed: "${query}". 
+      List 5 unique and actual street addresses in NZ that strictly match or expand this prefix. 
+      
+      RULES:
+      - ONLY New Zealand addresses.
+      - MUST be real street addresses (Number, Street, Suburb, City).
+      - Return ONLY a plain text list, one address per line.
+      - NO numbers, NO bullet points, NO extra text.`,
       config: {
         tools: [{ googleMaps: {} }],
       },
@@ -65,18 +70,18 @@ export const searchAddresses = async (query: string): Promise<string[]> => {
 
     const text = response.text || "";
     
-    // resilient parsing for lines
-    const lines = text.split('\n');
-    const addresses = lines
+    // Improved parsing for list-style outputs
+    const rawLines = text.split('\n');
+    const addresses = rawLines
       .map(line => {
-        // Strip out common list artifacts (dots, numbers, dashes, asterisks)
+        // Remove markdown bullets, numbering, or leading/trailing whitespace
         let cleaned = line.replace(/^[\*\-\s\d\.\)]+/, '').trim();
-        // Remove trailing punctuation
+        // Remove any trailing punctuation
         cleaned = cleaned.replace(/[.,;]$/, '').trim();
         return cleaned;
       })
       .filter(line => {
-        // Ensure it's a substantive string and looks like an address (usually has a space for number/street)
+        // High quality filters: minimum length and must contain a space (number/street separation)
         return line.length > 8 && line.includes(' ');
       });
 
@@ -85,13 +90,11 @@ export const searchAddresses = async (query: string): Promise<string[]> => {
       return Array.from(new Set(addresses)).slice(0, 5);
     }
     
-    // Fallback: Check grounding metadata if direct text parsing yields nothing
-    // Fix: Explicitly cast groundingChunks to any[] to avoid 'unknown[]' vs 'string[]' mismatch
+    // Fallback: Check grounding metadata directly if text generation is verbose or fails
     const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks as any[] | undefined;
     if (chunks && chunks.length > 0) {
        const chunkAddresses = chunks
          .map((c: any) => c.maps?.title || c.web?.title)
-         // Fix: Use type guard to ensure t is a string for the resulting array
          .filter((t: any): t is string => typeof t === 'string' && t.length > 8)
          .slice(0, 5);
        if (chunkAddresses.length > 0) return Array.from(new Set(chunkAddresses));
