@@ -44,54 +44,64 @@ export const analyzeTools = async (tools: Tool[], query: string): Promise<string
 };
 
 // Search for addresses using Google Maps grounding
-export const searchAddresses = async (query: string): Promise<string[]> => {
+export const searchAddresses = async (
+  query: string, 
+  coords?: { latitude: number; longitude: number }
+): Promise<string[]> => {
   if (!query || query.trim().length < 3) return [];
   
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   try {
-    // We use gemini-2.5-flash as it supports googleMaps grounding
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
       contents: `Act as a high-precision New Zealand address locator. 
-      Find real street addresses in New Zealand that strictly start with or are highly relevant to the prefix: "${query}".
-      Focus on active construction sites, residential, or commercial areas.
+      Find real street addresses in New Zealand that strictly start with or are highly relevant to the search term: "${query}".
+      
+      CRITICAL: Include the house numbers and full street names.
       Return exactly 5 unique full addresses.
-      Format: Plain text only, one address per line. No bullets, no numbers, no markdown formatting, no introductory text.`,
+      Format: Return ONLY the addresses, one per line. Do not use bullets, numbering (like 1. 2. 3.), or any other list markers.`,
       config: {
         tools: [{ googleMaps: {} }],
+        toolConfig: coords ? {
+          retrievalConfig: {
+            latLng: {
+              latitude: coords.latitude,
+              longitude: coords.longitude
+            }
+          }
+        } : undefined
       },
     });
 
     const text = response.text || "";
     
-    // resilient parsing for lines
+    // Split into lines and clean up formatting artifacts
     const lines = text.split('\n');
     const addresses = lines
       .map(line => {
-        // Strip out common list artifacts (dots, numbers, dashes, asterisks)
-        let cleaned = line.replace(/^[\*\-\s\d\.\)]+/, '').trim();
+        // IMPROVED REGEX: Only strip list markers (e.g., "1. ", "- ", "* "). 
+        // DO NOT strip leading digits that are part of a house number.
+        let cleaned = line.replace(/^(\d+[\.\)]|[\*\-])\s+/, '').trim();
         // Remove trailing punctuation
         cleaned = cleaned.replace(/[.,;]$/, '').trim();
         return cleaned;
       })
       .filter(line => {
-        // Ensure it's a substantive string and looks like an address (usually has a space for number/street)
+        // Ensure it's a substantive string and looks like an address 
+        // (usually has a space between house number and street name)
         return line.length > 8 && line.includes(' ');
       });
 
     if (addresses.length > 0) {
-      // Return top 5, ensuring they are unique
       return Array.from(new Set(addresses)).slice(0, 5);
     }
     
     // Fallback: Check grounding metadata if direct text parsing yields nothing
-    // Fix: Explicitly cast groundingChunks to any[] to avoid 'unknown[]' vs 'string[]' mismatch
     const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks as any[] | undefined;
     if (chunks && chunks.length > 0) {
        const chunkAddresses = chunks
          .map((c: any) => c.maps?.title || c.web?.title)
-         // Fix: Use type guard to ensure t is a string for the resulting array
          .filter((t: any): t is string => typeof t === 'string' && t.length > 8)
          .slice(0, 5);
        if (chunkAddresses.length > 0) return Array.from(new Set(chunkAddresses));

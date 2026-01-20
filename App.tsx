@@ -56,7 +56,8 @@ import {
   Zap,
   ChevronRight,
   ListFilter,
-  CalendarDays
+  CalendarDays,
+  ChevronUp
 } from 'lucide-react';
 import { analyzeTools, searchAddresses } from './services/geminiService';
 import { fetchTools, fetchUsers, syncTools, syncUsers, upsertSingleTool, upsertSingleUser, deleteSingleUser, supabase } from './services/supabaseService';
@@ -84,6 +85,7 @@ const App: React.FC = () => {
   const [showAddTool, setShowAddTool] = useState(false);
   const [returningTool, setReturningTool] = useState<Tool | null>(null);
   const [bookingTool, setBookingTool] = useState<Tool | null>(null);
+  const [selectedToolForDetail, setSelectedToolForDetail] = useState<Tool | null>(null);
 
   const loadData = async () => {
     try {
@@ -324,7 +326,6 @@ const App: React.FC = () => {
       currentSite: undefined,
       bookedAt: undefined,
       lastReturnedAt: Date.now(),
-      // Fix: Ensure the action property is strictly typed as 'RETURN' using as const
       logs: [{
         id: Math.random().toString(36).substr(2, 9),
         userId: currentUser.id,
@@ -351,7 +352,6 @@ const App: React.FC = () => {
       currentHolderName: currentUser.name,
       currentSite: siteAddress,
       bookedAt: Date.now(),
-      // Fix: Ensure the action property is strictly typed as 'BOOK_OUT' using as const
       logs: [{
         id: Math.random().toString(36).substr(2, 9),
         userId: currentUser.id,
@@ -364,6 +364,14 @@ const App: React.FC = () => {
 
     setBookingTool(null);
     await updateTool(updatedTool);
+  };
+
+  const handleAddLogToTool = async (tool: Tool, log: ToolLog) => {
+    const updatedTool = { ...tool, logs: [log, ...(tool.logs || [])].slice(0, 50) };
+    await updateTool(updatedTool);
+    if (selectedToolForDetail?.id === tool.id) {
+      setSelectedToolForDetail(updatedTool);
+    }
   };
 
   const handleForgotPassword = async (email: string): Promise<string> => {
@@ -428,6 +436,15 @@ const App: React.FC = () => {
       {showAddTool && <AddToolModal onClose={() => setShowAddTool(false)} onSave={handleAddTool} />}
       {returningTool && <ReturnToolModal tool={returningTool} onClose={() => setReturningTool(null)} onConfirm={handleReturnTool} />}
       {bookingTool && <BookOutModal tool={bookingTool} onClose={() => setBookingTool(null)} onConfirm={handleConfirmBookOut} />}
+      {selectedToolForDetail && (
+        <ToolDetailModal 
+          tool={selectedToolForDetail} 
+          users={allUsers}
+          currentUser={currentUser}
+          onClose={() => setSelectedToolForDetail(null)} 
+          onAddLog={handleAddLogToTool}
+        />
+      )}
 
       {view === 'INVENTORY' && (
         <InventoryView 
@@ -441,6 +458,7 @@ const App: React.FC = () => {
           currentUser={currentUser}
           onInitiateBookOut={(t: Tool) => setBookingTool(t)}
           onInitiateReturn={(t: Tool) => setReturningTool(t)}
+          onViewDetail={(t: Tool) => setSelectedToolForDetail(t)}
         />
       )}
 
@@ -457,6 +475,7 @@ const App: React.FC = () => {
           userRole={currentUser.role}
           currentUserId={currentUser.id}
           currentUserName={currentUser.name}
+          onViewDetail={(t: Tool) => setSelectedToolForDetail(t)}
         />
       )}
 
@@ -467,6 +486,7 @@ const App: React.FC = () => {
           tools={tools.filter(t => t.currentHolderId && String(t.currentHolderId).trim().toLowerCase() === String(currentUser.id).trim().toLowerCase())} 
           currentUser={currentUser} 
           onInitiateReturn={(t: Tool) => setReturningTool(t)}
+          onViewDetail={(t: Tool) => setSelectedToolForDetail(t)}
         />
       )}
     </Layout>
@@ -475,12 +495,159 @@ const App: React.FC = () => {
 
 // --- Modals & Views ---
 
+const ToolDetailModal: React.FC<{ tool: Tool; onClose: () => void; onAddLog: (tool: Tool, log: ToolLog) => void; users: User[]; currentUser: User }> = ({ tool, onClose, onAddLog, users, currentUser }) => {
+  const [showAddLog, setShowAddLog] = useState(false);
+  const [logsExpanded, setLogsExpanded] = useState(false);
+  const [newLog, setNewLog] = useState({ action: 'BOOK_OUT' as any, comment: '', userId: currentUser.id });
+
+  const history = useMemo(() => {
+    return (tool.logs || []);
+  }, [tool.logs]);
+
+  const handleManualLog = () => {
+    const matchedUser = users.find(u => u.id === newLog.userId);
+    const log: ToolLog = {
+      id: Math.random().toString(36).substr(2, 9),
+      userId: newLog.userId,
+      userName: matchedUser?.name || 'Unknown',
+      action: newLog.action,
+      timestamp: Date.now(),
+      comment: newLog.comment,
+    };
+    onAddLog(tool, log);
+    setShowAddLog(false);
+    setLogsExpanded(true);
+    setNewLog({ action: 'BOOK_OUT', comment: '', userId: currentUser.id });
+  };
+
+  return (
+    <div className="fixed inset-0 z-[750] bg-neda-navy/95 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-6 animate-in fade-in">
+      <div className="bg-white w-full max-w-lg h-[90vh] sm:h-auto sm:max-h-[85vh] rounded-t-[3rem] sm:rounded-[3rem] shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-10">
+        <div className="p-8 border-b border-slate-50 flex justify-between items-start shrink-0">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-[8px] font-black text-neda-orange bg-neda-lightOrange px-2 py-0.5 rounded uppercase tracking-[0.2em]">{tool.category}</span>
+              <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded ${tool.status === ToolStatus.AVAILABLE ? 'bg-green-50 text-green-600' : 'bg-orange-50 text-orange-600'}`}>{tool.status.replace('_', ' ')}</span>
+            </div>
+            <h2 className="text-2xl font-black text-neda-navy uppercase tracking-tight leading-tight">{tool.name}</h2>
+            <div className="flex items-center gap-3 mt-1.5">
+               <span className="text-[10px] font-bold text-slate-400 uppercase">SN: {tool.serialNumber || 'No Serial'}</span>
+               {tool.dateOfPurchase && <span className="text-[10px] font-bold text-slate-300 uppercase">Purchased: {new Date(tool.dateOfPurchase).toLocaleDateString()}</span>}
+            </div>
+          </div>
+          <button onClick={onClose} className="p-3 bg-slate-50 rounded-2xl text-slate-400 hover:text-neda-navy transition-all"><X size={24} /></button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-8 hide-scrollbar">
+          {showAddLog ? (
+            <div className="space-y-4 animate-in zoom-in-95">
+              <h3 className="text-xs font-black text-neda-navy uppercase tracking-widest mb-4">Manual Log Entry</h3>
+              <div className="space-y-1">
+                <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest pl-1">Action Type</span>
+                <select className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm outline-none" value={newLog.action} onChange={e => setNewLog({...newLog, action: e.target.value as any})}>
+                  <option value="BOOK_OUT">Book Out</option>
+                  <option value="RETURN">Return</option>
+                  <option value="CREATE">Note / Maintenance</option>
+                </select>
+              </div>
+              <div className="space-y-1">
+                <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest pl-1">Assign To Staff</span>
+                <select className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm outline-none" value={newLog.userId} onChange={e => setNewLog({...newLog, userId: e.target.value})}>
+                  {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                </select>
+              </div>
+              <div className="space-y-1">
+                <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest pl-1">Comments</span>
+                <textarea className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm min-h-[100px] outline-none" placeholder="Add details..." value={newLog.comment} onChange={e => setNewLog({...newLog, comment: e.target.value})} />
+              </div>
+              <div className="flex gap-3 pt-4">
+                <button onClick={() => setShowAddLog(false)} className="flex-1 py-4 text-slate-400 text-[10px] font-black uppercase tracking-widest">Cancel</button>
+                <button onClick={handleManualLog} className="flex-[2] py-4 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all">Submit Entry</button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-8">
+              {tool.notes && (
+                <div className="space-y-2">
+                  <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Equipment Notes</h3>
+                  <p className="text-xs font-medium text-slate-600 leading-relaxed bg-slate-50 p-4 rounded-2xl border border-slate-100 italic">"{tool.notes}"</p>
+                </div>
+              )}
+
+              <div className="space-y-4">
+                <button 
+                  onClick={() => setLogsExpanded(!logsExpanded)}
+                  className="w-full flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-neda-navy/20 transition-all"
+                >
+                  <div className="flex items-center gap-3">
+                    <History size={18} className="text-neda-navy opacity-50" />
+                    <span className="text-[10px] font-black text-neda-navy uppercase tracking-widest">History & Logs ({history.length})</span>
+                  </div>
+                  {logsExpanded ? <ChevronUp size={18} className="text-slate-300" /> : <ChevronDown size={18} className="text-slate-300" />}
+                </button>
+
+                {logsExpanded && (
+                  <div className="animate-in slide-in-from-top-4 duration-300">
+                    <div className="flex justify-between items-center mb-6 pl-2">
+                      <span className="text-[8px] font-black text-slate-400 uppercase tracking-[0.2em]">Full Timeline</span>
+                      <button onClick={() => setShowAddLog(true)} className="flex items-center gap-2 px-3 py-1.5 bg-neda-navy/5 text-neda-navy rounded-lg font-black text-[8px] uppercase tracking-widest hover:bg-neda-navy hover:text-white transition-all"><Plus size={10} /> Add Entry</button>
+                    </div>
+                    
+                    <div className="relative border-l-2 border-slate-100 ml-3 pl-8 space-y-10 py-2">
+                      {history.length > 0 ? history.map((log, idx) => (
+                        <div key={log.id} className="relative group">
+                          <div className={`absolute -left-[41px] top-0 w-5 h-5 rounded-full border-4 border-white shadow-sm flex items-center justify-center ${log.action === 'BOOK_OUT' ? 'bg-orange-500' : log.action === 'RETURN' ? 'bg-green-500' : 'bg-slate-300'}`}></div>
+                          <div className="flex flex-col">
+                            <div className="flex justify-between items-start mb-1">
+                              <span className={`text-[8px] font-black uppercase tracking-widest ${log.action === 'BOOK_OUT' ? 'text-orange-600' : log.action === 'RETURN' ? 'text-green-600' : 'text-slate-500'}`}>
+                                {log.action.replace('_', ' ')}
+                              </span>
+                              <span className="text-[8px] font-black text-slate-300 uppercase tracking-tighter">{new Date(log.timestamp).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</span>
+                            </div>
+                            <p className="text-xs font-black text-neda-navy uppercase">{log.userName}</p>
+                            {log.site && <div className="flex items-center gap-1.5 mt-1 text-slate-400"><MapPin size={10} /><span className="text-[9px] font-bold uppercase truncate">{log.site}</span></div>}
+                            {log.condition && <div className="flex items-center gap-1.5 mt-1"><CheckCircle2 size={10} className="text-green-500" /><span className="text-[9px] font-bold text-slate-500 uppercase">Condition: {log.condition}</span></div>}
+                            {log.comment && <p className="mt-2 p-3 bg-white rounded-xl text-[10px] font-medium text-slate-500 border border-slate-100 leading-relaxed shadow-sm">"{log.comment}"</p>}
+                          </div>
+                        </div>
+                      )) : (
+                        <div className="py-6 text-center text-slate-300 font-black uppercase text-[10px] ml-[-32px]">No log entries yet</div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const BookOutModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (tool: Tool, siteAddress: string) => void }> = ({ tool, onClose, onConfirm }) => {
   const [addressInput, setAddressInput] = useState('');
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [hasAttemptedSearch, setHasAttemptedSearch] = useState(false);
+  const [userCoords, setUserCoords] = useState<{ latitude: number; longitude: number } | undefined>(undefined);
   const searchTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          setUserCoords({
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+          });
+        },
+        (error) => {
+          console.warn("Geolocation access denied or failed.", error);
+        }
+      );
+    }
+  }, []);
 
   const handleAddressChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
@@ -492,10 +659,10 @@ const BookOutModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (tool
       setIsSearching(true);
       setHasAttemptedSearch(true);
       searchTimeoutRef.current = window.setTimeout(async () => {
-        const results = await searchAddresses(value);
+        const results = await searchAddresses(value, userCoords);
         setSuggestions(results);
         setIsSearching(false);
-      }, 350);
+      }, 400); 
     } else {
       setSuggestions([]);
       setIsSearching(false);
@@ -507,6 +674,7 @@ const BookOutModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (tool
     e.preventDefault();
     setAddressInput(addr);
     setSuggestions([]);
+    setHasAttemptedSearch(false);
   };
 
   return (
@@ -554,9 +722,12 @@ const BookOutModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (tool
                     </button>
                   ))
                 ) : !isSearching && hasAttemptedSearch && (
-                  <div className="px-5 py-8 text-center flex flex-col items-center gap-2">
-                    <div className="bg-slate-50 p-3 rounded-full"><MapPin size={16} className="text-slate-200" /></div>
-                    <p className="text-[9px] font-black text-slate-300 uppercase tracking-[0.2em]">No addresses found nearby</p>
+                  <div className="px-5 py-10 text-center flex flex-col items-center gap-3 bg-slate-50/50">
+                    <div className="bg-white p-3 rounded-full shadow-sm"><MapPin size={18} className="text-slate-200" /></div>
+                    <div className="space-y-1">
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Searching for addresses...</p>
+                      <p className="text-[7px] font-bold text-slate-300 uppercase tracking-widest">Type more to refine results</p>
+                    </div>
                   </div>
                 )}
               </div>
@@ -660,94 +831,6 @@ const AddToolModal: React.FC<{ onClose: () => void; onSave: (t: Tool) => void }>
   );
 };
 
-const AssetHistoryModal: React.FC<{ tool: Tool; onClose: () => void; onAddLog: (tool: Tool, log: ToolLog) => void; users: User[]; currentUser: User }> = ({ tool, onClose, onAddLog, users, currentUser }) => {
-  const [showAddLog, setShowAddLog] = useState(false);
-  const [newLog, setNewLog] = useState({ action: 'BOOK_OUT' as any, comment: '', userId: currentUser.id });
-
-  const lastLogs = useMemo(() => {
-    return (tool.logs || []).slice(0, 10);
-  }, [tool.logs]);
-
-  const handleManualLog = () => {
-    const matchedUser = users.find(u => u.id === newLog.userId);
-    const log: ToolLog = {
-      id: Math.random().toString(36).substr(2, 9),
-      userId: newLog.userId,
-      userName: matchedUser?.name || 'Unknown',
-      action: newLog.action,
-      timestamp: Date.now(),
-      comment: newLog.comment,
-    };
-    onAddLog(tool, log);
-    setShowAddLog(false);
-    setNewLog({ action: 'BOOK_OUT', comment: '', userId: currentUser.id });
-  };
-
-  return (
-    <div className="fixed inset-0 z-[750] bg-neda-navy/95 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-6 animate-in fade-in">
-      <div className="bg-white w-full max-w-lg h-[90vh] sm:h-auto sm:max-h-[85vh] rounded-t-[3rem] sm:rounded-[3rem] shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-10">
-        <div className="p-8 border-b border-slate-50 flex justify-between items-start shrink-0">
-          <div>
-            <span className="text-[8px] font-black text-neda-orange uppercase tracking-widest mb-1 block">Asset Timeline</span>
-            <h2 className="text-2xl font-black text-neda-navy uppercase tracking-tight leading-tight">{tool.name}</h2>
-            <p className="text-[10px] font-bold text-slate-400 uppercase mt-1">SN: {tool.serialNumber || 'N/A'}</p>
-          </div>
-          <button onClick={onClose} className="p-3 bg-slate-50 rounded-2xl text-slate-400 hover:text-neda-navy transition-all"><X size={24} /></button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-8 hide-scrollbar">
-          {showAddLog ? (
-            <div className="space-y-4 animate-in zoom-in-95">
-              <h3 className="text-xs font-black text-neda-navy uppercase tracking-widest mb-4">Add Manual Entry</h3>
-              <select className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm" value={newLog.action} onChange={e => setNewLog({...newLog, action: e.target.value as any})}>
-                <option value="BOOK_OUT">Book Out</option>
-                <option value="RETURN">Return</option>
-                <option value="CREATE">Maintenance/Note</option>
-              </select>
-              <select className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm" value={newLog.userId} onChange={e => setNewLog({...newLog, userId: e.target.value})}>
-                {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-              </select>
-              <textarea className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm min-h-[100px]" placeholder="Add context or notes..." value={newLog.comment} onChange={e => setNewLog({...newLog, comment: e.target.value})} />
-              <div className="flex gap-3 pt-2">
-                <button onClick={() => setShowAddLog(false)} className="flex-1 py-4 text-slate-400 text-[10px] font-black uppercase">Cancel</button>
-                <button onClick={handleManualLog} className="flex-[2] py-4 bg-neda-navy text-white rounded-2xl font-black uppercase shadow-xl">Commit Entry</button>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-8">
-              <div className="flex justify-between items-center">
-                <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Activity Log</h3>
-                <button onClick={() => setShowAddLog(true)} className="flex items-center gap-2 px-4 py-2 bg-neda-navy/5 text-neda-navy rounded-xl font-black text-[9px] uppercase hover:bg-neda-navy hover:text-white transition-all"><Plus size={14} /> Manual Log</button>
-              </div>
-              
-              <div className="relative border-l-2 border-slate-100 ml-3 pl-8 space-y-10">
-                {lastLogs.length > 0 ? lastLogs.map((log, idx) => (
-                  <div key={log.id} className="relative group">
-                    <div className={`absolute -left-[41px] top-0 w-5 h-5 rounded-full border-4 border-white shadow-sm flex items-center justify-center ${log.action === 'BOOK_OUT' ? 'bg-orange-500' : log.action === 'RETURN' ? 'bg-green-500' : 'bg-slate-300'}`}></div>
-                    <div className="flex flex-col">
-                      <div className="flex justify-between items-start mb-1">
-                        <span className={`text-[8px] font-black uppercase tracking-widest ${log.action === 'BOOK_OUT' ? 'text-orange-600' : log.action === 'RETURN' ? 'text-green-600' : 'text-slate-500'}`}>
-                          {log.action.replace('_', ' ')}
-                        </span>
-                        <span className="text-[8px] font-black text-slate-300 uppercase">{new Date(log.timestamp).toLocaleDateString()}</span>
-                      </div>
-                      <p className="text-xs font-black text-neda-navy uppercase">{log.userName}</p>
-                      {log.site && <div className="flex items-center gap-1.5 mt-1 text-slate-400"><MapPin size={10} /><span className="text-[9px] font-bold uppercase truncate">{log.site}</span></div>}
-                      {log.comment && <p className="mt-2 p-3 bg-slate-50 rounded-xl text-[10px] font-medium text-slate-600 border border-slate-100 italic leading-relaxed">"{log.comment}"</p>}
-                    </div>
-                  </div>
-                )) : (
-                  <div className="py-10 text-center text-slate-300 font-black uppercase text-[10px] ml-[-32px]">No log entries yet</div>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-};
-
 const MandatoryPasswordChange: React.FC<{ user: User; onUpdate: (u: User) => void }> = ({ user, onUpdate }) => {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -827,7 +910,7 @@ const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, users, isBiomet
   );
 };
 
-const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, statusFilter, setStatusFilter, showFilters, setShowFilters, currentUser, onInitiateBookOut, onInitiateReturn }) => (
+const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, statusFilter, setStatusFilter, showFilters, setShowFilters, currentUser, onInitiateBookOut, onInitiateReturn, onViewDetail }) => (
   <div className="space-y-6">
     <div className="relative">
       <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
@@ -841,7 +924,7 @@ const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, status
         const isAvailable = tool.status === ToolStatus.AVAILABLE;
         const isServiced = tool.status === ToolStatus.GETTING_SERVICED;
         return (
-          <div key={tool.id} className="px-6 py-5 flex items-center justify-between hover:bg-slate-50 transition-colors">
+          <div key={tool.id} onClick={() => onViewDetail(tool)} className="px-6 py-5 flex items-center justify-between hover:bg-slate-50 transition-colors cursor-pointer">
             <div className="flex-1 min-w-0 pr-4">
               <div className="flex items-center gap-2 mb-1">
                  <span className="text-[7px] font-black uppercase tracking-widest text-neda-orange bg-neda-lightOrange px-1.5 py-0.5 rounded-sm">{tool.category}</span>
@@ -853,7 +936,7 @@ const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, status
                  <div className="flex items-center gap-1.5"><MapPin size={10} className="text-slate-300" /><span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider truncate max-w-[110px]">{tool.currentSite || 'Warehouse'}</span></div>
               </div>
             </div>
-            {(isAvailable || isHeldByMe) && <button onClick={() => isAvailable ? onInitiateBookOut(tool) : onInitiateReturn(tool)} className={`shrink-0 px-4 py-2.5 rounded-xl font-black text-[9px] uppercase tracking-widest transition-all active:scale-95 shadow-md ${isAvailable ? 'bg-neda-navy text-white' : 'bg-white border border-neda-orange text-neda-orange'}`}>{isAvailable ? 'Book Out' : 'Return'}</button>}
+            {(isAvailable || isHeldByMe) && <button onClick={(e) => { e.stopPropagation(); isAvailable ? onInitiateBookOut(tool) : onInitiateReturn(tool); }} className={`shrink-0 px-4 py-2.5 rounded-xl font-black text-[9px] uppercase tracking-widest transition-all active:scale-95 shadow-md ${isAvailable ? 'bg-neda-navy text-white' : 'bg-white border border-neda-orange text-neda-orange'}`}>{isAvailable ? 'Book Out' : 'Return'}</button>}
             {isHeldByOthers && <div className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 text-slate-400 rounded-lg text-[8px] font-black uppercase border border-slate-100"><Clock size={10} />In Use</div>}
             {isServiced && <div className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-600 rounded-lg text-[8px] font-black uppercase border border-red-100"><Stethoscope size={10} />Service</div>}
           </div>
@@ -863,9 +946,8 @@ const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, status
   </div>
 );
 
-const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDeleteUser, onUpdateTool, onShowAddUser, onShowAddTool, onRepairData, userRole, currentUserId, currentUserName }) => {
+const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDeleteUser, onUpdateTool, onShowAddUser, onShowAddTool, onRepairData, userRole, currentUserId, currentUserName, onViewDetail }) => {
   const [activeTab, setActiveTab] = useState<'USERS' | 'STOCKTAKE' | 'ACTIVE_BOOKINGS' | 'HEALTH'>('USERS');
-  const [selectedToolForHistory, setSelectedToolForHistory] = useState<Tool | null>(null);
   const [assetSearch, setAssetSearch] = useState('');
 
   const bookedTools = useMemo(() => tools.filter((t: Tool) => t.status === ToolStatus.BOOKED_OUT), [tools]);
@@ -875,23 +957,30 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
     return tools.filter(t => t.name.toLowerCase().includes(assetSearch.toLowerCase()) || (t.serialNumber || '').toLowerCase().includes(assetSearch.toLowerCase()));
   }, [tools, assetSearch]);
 
-  const handleAddLogToTool = async (tool: Tool, log: ToolLog) => {
-    const updatedTool = { ...tool, logs: [log, ...(tool.logs || [])].slice(0, 50) };
-    await onUpdateTool(updatedTool);
+  const handleExportCSV = () => {
+    const headers = ['Tool Name', 'Category', 'Status', 'Current Holder', 'Site Location', 'Serial Number'];
+    const rows = tools.map(t => [
+      `"${t.name}"`,
+      `"${t.category}"`,
+      `"${t.status}"`,
+      `"${t.currentHolderName || 'Warehouse'}"`,
+      `"${t.currentSite || 'N/A'}"`,
+      `"${t.serialNumber || ''}"`
+    ]);
+
+    const csvContent = [headers, ...rows].map(e => e.join(",")).join("\n");
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `NEDA_Stocktake_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   return (
     <div className="space-y-6">
-      {selectedToolForHistory && (
-        <AssetHistoryModal 
-          tool={selectedToolForHistory} 
-          users={allUsers}
-          currentUser={allUsers.find(u => u.id === currentUserId)!}
-          onClose={() => setSelectedToolForHistory(null)} 
-          onAddLog={handleAddLogToTool}
-        />
-      )}
-
       <div className="flex gap-4 border-b border-slate-100 pb-2 overflow-x-auto hide-scrollbar whitespace-nowrap">
         <button onClick={() => setActiveTab('USERS')} className={`pb-2 text-[10px] font-black uppercase tracking-widest ${activeTab === 'USERS' ? 'text-neda-orange border-b-2 border-neda-orange' : 'text-slate-400'}`}>Staff List</button>
         <button onClick={() => setActiveTab('ACTIVE_BOOKINGS')} className={`pb-2 text-[10px] font-black uppercase tracking-widest ${activeTab === 'ACTIVE_BOOKINGS' ? 'text-neda-orange border-b-2 border-neda-orange' : 'text-slate-400'}`}>Bookings</button>
@@ -913,7 +1002,7 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
           <div className="bg-white rounded-[2rem] border border-slate-100 overflow-hidden shadow-sm">
             <div className="px-6 py-4 bg-slate-50 border-b border-slate-100 flex justify-between items-center"><h4 className="text-[10px] font-black uppercase text-slate-400">Current Assignments</h4><span className="bg-neda-navy text-white text-[8px] font-black px-2 py-0.5 rounded-full">{bookedTools.length} Out</span></div>
             <div className="divide-y divide-slate-50">{bookedTools.length > 0 ? bookedTools.map((t: Tool) => (
-              <div key={t.id} className="px-6 py-5 flex items-center justify-between"><div className="min-w-0 flex-1 pr-4"><p className="font-black text-neda-navy text-xs uppercase truncate">{t.name}</p><div className="flex flex-col gap-0.5 mt-1"><div className="flex items-center gap-1.5 text-slate-400"><UserIcon size={10} /><span className="text-[9px] font-bold uppercase">{t.currentHolderName || 'ID lookup required'}</span></div><div className="flex items-center gap-1.5 text-neda-orange"><MapPin size={10} /><span className="text-[9px] font-bold uppercase truncate">{t.currentSite}</span></div></div></div><button onClick={() => { if(window.confirm(`Force return ${t.name}?`)) onUpdateTool({...t, status: ToolStatus.AVAILABLE, currentHolderId: undefined, currentHolderName: undefined, currentSite: undefined, bookedAt: undefined}); }} className="shrink-0 p-2 text-slate-300 hover:text-red-500 transition-all"><RefreshCcw size={18} /></button></div>
+              <div key={t.id} onClick={() => onViewDetail(t)} className="px-6 py-5 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition-colors"><div className="min-w-0 flex-1 pr-4"><p className="font-black text-neda-navy text-xs uppercase truncate">{t.name}</p><div className="flex flex-col gap-0.5 mt-1"><div className="flex items-center gap-1.5 text-slate-400"><UserIcon size={10} /><span className="text-[9px] font-bold uppercase">{t.currentHolderName || 'ID lookup required'}</span></div><div className="flex items-center gap-1.5 text-neda-orange"><MapPin size={10} /><span className="text-[9px] font-bold uppercase truncate">{t.currentSite}</span></div></div></div><button onClick={(e) => { e.stopPropagation(); if(window.confirm(`Force return ${t.name}?`)) onUpdateTool({...t, status: ToolStatus.AVAILABLE, currentHolderId: undefined, currentHolderName: undefined, currentSite: undefined, bookedAt: undefined}); }} className="shrink-0 p-2 text-slate-300 hover:text-red-500 transition-all"><RefreshCcw size={18} /></button></div>
             )) : <div className="px-6 py-12 text-center text-slate-300 font-black uppercase text-[10px]">No active bookings</div>}</div>
           </div>
         </div>
@@ -921,7 +1010,10 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
 
       {activeTab === 'STOCKTAKE' && (
         <div className="space-y-4 animate-in fade-in">
-          <button onClick={onShowAddTool} className="w-full flex items-center justify-between p-6 bg-slate-50 border border-dashed border-slate-200 rounded-[2rem] hover:bg-slate-100 transition-colors"><div className="flex items-center gap-4"><div className="w-12 h-12 rounded-2xl bg-white flex items-center justify-center text-neda-navy shadow-sm"><Package size={24} /></div><div className="text-left"><h4 className="font-black text-neda-navy uppercase text-xs">Register Asset</h4><p className="text-[8px] font-bold text-slate-400 uppercase">Add to inventory</p></div></div><PlusCircle size={24} className="text-neda-orange" /></button>
+          <div className="flex gap-3">
+            <button onClick={onShowAddTool} className="flex-1 flex items-center justify-between p-6 bg-slate-50 border border-dashed border-slate-200 rounded-[2rem] hover:bg-slate-100 transition-colors"><div className="flex items-center gap-4"><div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center text-neda-navy shadow-sm"><Package size={20} /></div><div className="text-left"><h4 className="font-black text-neda-navy uppercase text-[10px]">Asset</h4><p className="text-[7px] font-bold text-slate-400 uppercase">Register</p></div></div><PlusCircle size={20} className="text-neda-orange" /></button>
+            <button onClick={handleExportCSV} className="flex-1 flex items-center justify-between p-6 bg-neda-navy text-white rounded-[2rem] shadow-lg active:scale-95 transition-all"><div className="flex items-center gap-4"><div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center text-chrisonic-cyan"><FileSpreadsheet size={20} /></div><div className="text-left"><h4 className="font-black uppercase text-[10px]">Export</h4><p className="text-[7px] font-bold text-slate-400 uppercase">Stocktake CSV</p></div></div><Download size={20} className="text-neda-orange" /></button>
+          </div>
           
           <div className="relative">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
@@ -930,7 +1022,7 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
 
           <div className="grid gap-3">
             {filteredAssets.map(tool => (
-              <div key={tool.id} onClick={() => setSelectedToolForHistory(tool)} className="bg-white p-5 rounded-[2rem] border border-slate-100 flex items-center justify-between shadow-sm active:scale-[0.98] transition-all cursor-pointer">
+              <div key={tool.id} onClick={() => onViewDetail(tool)} className="bg-white p-5 rounded-[2rem] border border-slate-100 flex items-center justify-between shadow-sm active:scale-[0.98] transition-all cursor-pointer">
                 <div className="flex-1 min-w-0">
                   <span className="text-[7px] font-black text-slate-300 uppercase tracking-widest mb-1 block">{tool.category}</span>
                   <h4 className="font-black text-neda-navy text-sm uppercase truncate pr-4">{tool.name}</h4>
@@ -967,7 +1059,7 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
              {unhealthyToolsCount > 0 ? (
                 <div className="space-y-2">
                    {tools.filter(t => (t.currentHolderName && !t.currentHolderId) || (t.currentHolderId && !t.currentHolderName) || (t.currentHolderId && t.status === ToolStatus.AVAILABLE)).map(t => (
-                      <div key={t.id} className="bg-white px-4 py-3 rounded-xl border border-red-100 flex items-center justify-between shadow-sm">
+                      <div key={t.id} onClick={() => onViewDetail(t)} className="bg-white px-4 py-3 rounded-xl border border-red-100 flex items-center justify-between shadow-sm cursor-pointer hover:bg-red-50/50">
                          <div className="flex flex-col">
                             <span className="text-[11px] font-black text-neda-navy uppercase">{t.name}</span>
                             <span className="text-[8px] font-bold text-red-400 uppercase">Lookup Required</span>
@@ -1015,7 +1107,7 @@ const AIAssistant: React.FC<any> = ({ tools }) => {
   );
 };
 
-const MyToolsView: React.FC<any> = ({ tools, currentUser, onInitiateReturn }) => (
+const MyToolsView: React.FC<any> = ({ tools, currentUser, onInitiateReturn, onViewDetail }) => (
   <div className="space-y-6">
     <div className="bg-neda-navy p-10 rounded-[3rem] text-white shadow-2xl relative overflow-hidden">
        <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-16 -mt-16"></div>
@@ -1030,13 +1122,13 @@ const MyToolsView: React.FC<any> = ({ tools, currentUser, onInitiateReturn }) =>
         </div>
       ) : (
         tools.map((tool: Tool) => (
-          <div key={tool.id} className="bg-white p-6 rounded-[2rem] border border-slate-100 flex flex-col shadow-sm animate-in slide-in-from-bottom-2">
+          <div key={tool.id} onClick={() => onViewDetail(tool)} className="bg-white p-6 rounded-[2rem] border border-slate-100 flex flex-col shadow-sm animate-in slide-in-from-bottom-2 cursor-pointer hover:bg-slate-50 transition-colors">
             <div className="flex justify-between items-start mb-4">
               <div className="flex flex-col">
                 <span className="text-[8px] font-bold text-slate-300 uppercase mb-0.5 tracking-widest">{tool.category}</span>
                 <h3 className="font-black text-neda-navy uppercase text-sm">{tool.name}</h3>
               </div>
-              <button onClick={() => onInitiateReturn(tool)} className="px-5 py-2.5 bg-slate-50 text-neda-orange rounded-xl font-black text-[10px] uppercase border border-neda-orange/10 transition-colors">Return</button>
+              <button onClick={(e) => { e.stopPropagation(); onInitiateReturn(tool); }} className="px-5 py-2.5 bg-slate-50 text-neda-orange rounded-xl font-black text-[10px] uppercase border border-neda-orange/10 transition-colors">Return</button>
             </div>
             <div className="mt-2 pt-4 border-t border-slate-50 flex items-center gap-2">
                <MapPin size={12} className="text-neda-orange" />
