@@ -46,7 +46,9 @@ import {
   MessageSquare,
   ClipboardCheck,
   Stethoscope,
-  Navigation
+  Navigation,
+  RefreshCcw,
+  Clock
 } from 'lucide-react';
 import { analyzeTools, searchAddresses } from './services/geminiService';
 import { fetchTools, fetchUsers, syncTools, syncUsers, upsertSingleTool, upsertSingleUser, deleteSingleUser, supabase } from './services/supabaseService';
@@ -423,6 +425,7 @@ const App: React.FC = () => {
           onShowAddTool={() => setShowAddTool(true)}
           userRole={currentUser.role}
           currentUserId={currentUser.id}
+          currentUserName={currentUser.name}
         />
       )}
 
@@ -997,59 +1000,77 @@ const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, status
 
       <div className="bg-white rounded-[2rem] border border-slate-100 overflow-hidden shadow-sm divide-y divide-slate-50">
         {tools.length > 0 ? (
-          tools.map((tool: Tool) => (
-            <div key={tool.id} className="px-6 py-5 flex items-center justify-between hover:bg-slate-50 transition-colors">
-              <div className="flex-1 min-w-0 pr-4">
-                <div className="flex items-center gap-2 mb-1">
-                   <span className="text-[7px] font-black uppercase tracking-widest text-neda-orange bg-neda-lightOrange px-1.5 py-0.5 rounded-sm">
-                     {tool.category}
-                   </span>
-                   <div className={`w-1.5 h-1.5 rounded-full ${
-                     tool.status === ToolStatus.AVAILABLE ? 'bg-green-500' : 
-                     tool.status === ToolStatus.GETTING_SERVICED ? 'bg-red-500' : 'bg-orange-500 animate-pulse'
-                   }`}></div>
-                </div>
-                
-                <h3 className="font-black text-neda-navy text-sm uppercase tracking-tight truncate">
-                  {tool.name}
-                </h3>
-                
-                <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5">
-                   <div className="flex items-center gap-1.5">
-                      <UserIcon size={10} className="text-slate-300" />
-                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider truncate max-w-[90px]">
-                        {tool.status === ToolStatus.GETTING_SERVICED ? 'Maintenance' : (tool.currentHolderName || 'Warehouse')}
-                      </span>
-                   </div>
-                   <div className="flex items-center gap-1.5">
-                      <MapPin size={10} className="text-slate-300" />
-                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider truncate max-w-[110px]">
-                        {tool.currentSite || 'Warehouse'}
-                      </span>
-                   </div>
-                </div>
-              </div>
+          tools.map((tool: Tool) => {
+            const isHeldByMe = tool.status === ToolStatus.BOOKED_OUT && tool.currentHolderId === currentUser.id;
+            const isHeldByOthers = tool.status === ToolStatus.BOOKED_OUT && tool.currentHolderId !== currentUser.id;
+            const isAvailable = tool.status === ToolStatus.AVAILABLE;
+            const isServiced = tool.status === ToolStatus.GETTING_SERVICED;
 
-              {(tool.status === ToolStatus.AVAILABLE || (tool.status === ToolStatus.BOOKED_OUT && tool.currentHolderId === currentUser.id)) && (
-                <button 
-                  onClick={() => handleAction(tool)} 
-                  className={`shrink-0 px-4 py-2.5 rounded-xl font-black text-[9px] uppercase tracking-widest transition-all active:scale-95 shadow-md ${
-                    tool.status === ToolStatus.AVAILABLE 
-                      ? 'bg-neda-navy text-white shadow-neda-navy/10' 
-                      : 'bg-white border border-neda-orange text-neda-orange shadow-neda-orange/5'
-                  }`}
-                >
-                  {tool.status === ToolStatus.AVAILABLE ? 'Book Out' : 'Return'}
-                </button>
-              )}
-              {tool.status === ToolStatus.GETTING_SERVICED && (
-                <div className="shrink-0 flex items-center gap-1 px-3 py-1.5 bg-red-50 text-red-600 rounded-lg text-[8px] font-black uppercase tracking-wider border border-red-100">
-                  <Stethoscope size={10} />
-                  Service
+            return (
+              <div key={tool.id} className="px-6 py-5 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                <div className="flex-1 min-w-0 pr-4">
+                  <div className="flex items-center gap-2 mb-1">
+                     <span className="text-[7px] font-black uppercase tracking-widest text-neda-orange bg-neda-lightOrange px-1.5 py-0.5 rounded-sm">
+                       {tool.category}
+                     </span>
+                     <div className={`w-1.5 h-1.5 rounded-full ${
+                       isAvailable ? 'bg-green-500' : 
+                       isServiced ? 'bg-red-500' : 'bg-orange-500 animate-pulse'
+                     }`}></div>
+                  </div>
+                  
+                  <h3 className="font-black text-neda-navy text-sm uppercase tracking-tight truncate">
+                    {tool.name}
+                  </h3>
+                  
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5">
+                     <div className="flex items-center gap-1.5">
+                        <UserIcon size={10} className="text-slate-300" />
+                        <span className={`text-[9px] font-bold uppercase tracking-wider truncate max-w-[90px] ${isHeldByOthers ? 'text-orange-600' : 'text-slate-400'}`}>
+                          {isServiced ? 'Maintenance' : (isAvailable ? 'Warehouse' : (tool.currentHolderName || 'User'))}
+                        </span>
+                     </div>
+                     <div className="flex items-center gap-1.5">
+                        <MapPin size={10} className="text-slate-300" />
+                        <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider truncate max-w-[110px]">
+                          {tool.currentSite || 'Warehouse'}
+                        </span>
+                     </div>
+                  </div>
                 </div>
-              )}
-            </div>
-          ))
+
+                {(isAvailable || isHeldByMe) && (
+                  <button 
+                    onClick={() => handleAction(tool)} 
+                    className={`shrink-0 px-4 py-2.5 rounded-xl font-black text-[9px] uppercase tracking-widest transition-all active:scale-95 shadow-md ${
+                      isAvailable 
+                        ? 'bg-neda-navy text-white shadow-neda-navy/10' 
+                        : 'bg-white border border-neda-orange text-neda-orange shadow-neda-orange/5'
+                    }`}
+                  >
+                    {isAvailable ? 'Book Out' : 'Return'}
+                  </button>
+                )}
+                
+                {isHeldByOthers && (
+                  <div className="shrink-0 flex flex-col items-end gap-1">
+                    <span className="text-[7px] font-black text-slate-300 uppercase tracking-widest mb-0.5">At Site</span>
+                    <div className="px-3 py-1.5 bg-slate-50 text-slate-400 rounded-lg text-[8px] font-black uppercase tracking-wider border border-slate-100 flex items-center gap-1.5">
+                      <Clock size={10} />
+                      In Use
+                    </div>
+                  </div>
+                )}
+
+                {isServiced && (
+                  <div className="shrink-0 flex items-center gap-1 px-3 py-1.5 bg-red-50 text-red-600 rounded-lg text-[8px] font-black uppercase tracking-wider border border-red-100">
+                    <Stethoscope size={10} />
+                    Service
+                  </div>
+                )}
+              </div>
+            );
+          })
         ) : (
           <div className="px-6 py-12 text-center">
             <Package size={40} className="mx-auto text-slate-100 mb-3" />
@@ -1057,14 +1078,25 @@ const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, status
           </div>
         )}
       </div>
+
+      <div className="p-5 bg-neda-lightNavy rounded-[2rem] border border-slate-200/50">
+        <div className="flex gap-4">
+          <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center text-neda-navy shadow-sm"><Info size={20} /></div>
+          <div className="flex-1">
+            <h4 className="text-[10px] font-black text-neda-navy uppercase tracking-tight mb-1">Warehouse Only</h4>
+            <p className="text-[9px] font-bold text-slate-500 leading-relaxed uppercase tracking-wider">Equipment can only be booked from the warehouse. If a tool is in use, the current holder must return it before it can be assigned to a new site.</p>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
 
-const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDeleteUser, onUpdateTool, onShowAddUser, onShowAddTool, userRole, currentUserId }) => {
-  const [activeTab, setActiveTab] = useState<'USERS' | 'STOCKTAKE' | 'REPORTS'>('USERS');
+const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDeleteUser, onUpdateTool, onShowAddUser, onShowAddTool, userRole, currentUserId, currentUserName }) => {
+  const [activeTab, setActiveTab] = useState<'USERS' | 'STOCKTAKE' | 'ACTIVE_BOOKINGS'>('USERS');
 
   const servicedTools = useMemo(() => tools.filter((t: Tool) => t.status === ToolStatus.GETTING_SERVICED), [tools]);
+  const bookedTools = useMemo(() => tools.filter((t: Tool) => t.status === ToolStatus.BOOKED_OUT), [tools]);
 
   const handleDownloadCSV = () => {
     const headers = ["Tool Name", "Category", "Serial Number", "Status", "Current Holder", "Current Site"];
@@ -1094,10 +1126,32 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
       logs: [...(tool.logs || []), {
         id: Math.random().toString(36).substr(2, 9),
         userId: currentUserId,
-        userName: 'Admin',
+        userName: currentUserName || 'Admin',
         action: 'RETURN',
         timestamp: Date.now(),
         comment: 'Maintenance completed. Returned to available stock.'
+      }]
+    });
+  };
+
+  const handleForceReturn = (tool: Tool) => {
+    const confirmed = window.confirm(`Force return "${tool.name}" to warehouse? This will end the current booking for ${tool.currentHolderName}.`);
+    if (!confirmed) return;
+
+    onUpdateTool({
+      ...tool,
+      status: ToolStatus.AVAILABLE,
+      currentHolderId: undefined,
+      currentHolderName: undefined,
+      currentSite: undefined,
+      bookedAt: undefined,
+      logs: [...(tool.logs || []), {
+        id: Math.random().toString(36).substr(2, 9),
+        userId: currentUserId,
+        userName: currentUserName || 'Admin',
+        action: 'RETURN',
+        timestamp: Date.now(),
+        comment: 'Manager forced return to warehouse.'
       }]
     });
   };
@@ -1106,8 +1160,8 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
     <div className="space-y-6">
       <div className="flex gap-4 border-b border-slate-100 pb-2 overflow-x-auto hide-scrollbar whitespace-nowrap">
         <button onClick={() => setActiveTab('USERS')} className={`pb-2 text-[10px] font-black uppercase tracking-widest flex-shrink-0 ${activeTab === 'USERS' ? 'text-neda-orange border-b-2 border-neda-orange' : 'text-slate-400'}`}>Staff List</button>
+        <button onClick={() => setActiveTab('ACTIVE_BOOKINGS')} className={`pb-2 text-[10px] font-black uppercase tracking-widest flex-shrink-0 ${activeTab === 'ACTIVE_BOOKINGS' ? 'text-neda-orange border-b-2 border-neda-orange' : 'text-slate-400'}`}>Bookings</button>
         <button onClick={() => setActiveTab('STOCKTAKE')} className={`pb-2 text-[10px] font-black uppercase tracking-widest flex-shrink-0 ${activeTab === 'STOCKTAKE' ? 'text-neda-orange border-b-2 border-neda-orange' : 'text-slate-400'}`}>Stocktake</button>
-        <button onClick={() => setActiveTab('REPORTS')} className={`pb-2 text-[10px] font-black uppercase tracking-widest flex-shrink-0 ${activeTab === 'REPORTS' ? 'text-neda-orange border-b-2 border-neda-orange' : 'text-slate-400'}`}>Analytics</button>
       </div>
 
       {/* Service Alerts Section */}
@@ -1179,6 +1233,47 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
         </div>
       )}
 
+      {activeTab === 'ACTIVE_BOOKINGS' && (
+        <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2">
+          <div className="bg-white rounded-[2rem] border border-slate-100 overflow-hidden shadow-sm">
+            <div className="px-6 py-4 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
+              <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Current Equipment Assignments</h4>
+              <span className="bg-neda-navy text-white text-[8px] font-black px-2 py-0.5 rounded-full">{bookedTools.length} Out</span>
+            </div>
+            <div className="divide-y divide-slate-50">
+              {bookedTools.length > 0 ? (
+                bookedTools.map((t: Tool) => (
+                  <div key={t.id} className="px-6 py-5 flex items-center justify-between hover:bg-slate-50/50 transition-colors">
+                    <div className="min-w-0 flex-1 pr-4">
+                      <p className="font-black text-neda-navy text-xs uppercase tracking-tight truncate">{t.name}</p>
+                      <div className="flex flex-col gap-0.5 mt-1">
+                        <div className="flex items-center gap-1.5 text-slate-400">
+                          <UserIcon size={10} />
+                          <span className="text-[9px] font-bold uppercase tracking-wider">{t.currentHolderName}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 text-neda-orange">
+                          <MapPin size={10} />
+                          <span className="text-[9px] font-bold uppercase tracking-wider truncate">{t.currentSite}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={() => handleForceReturn(t)}
+                      className="shrink-0 p-2 bg-slate-50 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all active:scale-90"
+                      title="Force Return to Warehouse"
+                    >
+                      <RefreshCcw size={18} />
+                    </button>
+                  </div>
+                ))
+              ) : (
+                <div className="px-6 py-12 text-center text-slate-300 font-black uppercase text-[10px] tracking-widest">No active bookings</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {activeTab === 'STOCKTAKE' && (
         <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2">
           <button 
@@ -1221,13 +1316,6 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
               ))}
             </div>
           </div>
-        </div>
-      )}
-
-      {activeTab === 'REPORTS' && (
-        <div className="p-8 text-center bg-white rounded-[2.5rem] border border-slate-100">
-          <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4"><ArrowUpRight className="text-slate-300" size={32} /></div>
-          <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Enhanced Analytics Coming Soon</p>
         </div>
       )}
     </div>
