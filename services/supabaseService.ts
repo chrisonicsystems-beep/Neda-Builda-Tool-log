@@ -20,18 +20,27 @@ const cleanPayload = (obj: any) => {
 };
 
 // Map User for writing to Database
-const mapUserToDb = (user: User) => cleanPayload({
-  id: user.id,
-  name: user.name,
-  role: user.role,
-  email: user.email,
-  password: user.password,
-  is_enabled: user.isEnabled,
-  must_change_password: user.mustChangePassword
-});
+const mapUserToDb = (user: User) => {
+  const payload: any = {
+    id: user.id,
+    name: user.name,
+    role: user.role,
+    email: user.email,
+    password: user.password,
+    is_enabled: user.isEnabled
+  };
+
+  // Only include must_change_password if it's explicitly set to true
+  // to avoid errors on legacy schemas that haven't added the column yet
+  if (user.mustChangePassword) {
+    payload.must_change_password = true;
+  }
+
+  return cleanPayload(payload);
+};
 
 const mapDbToUser = (dbUser: any): User => ({
-  id: String(dbUser.id), // Ensure ID is always treated as a string in the app
+  id: String(dbUser.id),
   name: dbUser.name || 'Unknown User',
   role: dbUser.role || 'USER',
   email: dbUser.email || '',
@@ -48,7 +57,6 @@ const mapToolToDb = (tool: Tool) => {
     status: tool.status || ToolStatus.AVAILABLE,
     current_holder_id: tool.currentHolderId || null,
     current_holder_name: tool.currentHolderName || null,
-    // Fix: Remove tool.current_site as it doesn't exist on Tool type. Use tool.currentSite.
     current_site: tool.currentSite || null,
     main_photo: tool.mainPhoto || null,
     notes: (tool.notes === undefined || tool.notes === null) ? '' : String(tool.notes),
@@ -57,7 +65,7 @@ const mapToolToDb = (tool: Tool) => {
     serial_number: tool.serialNumber || '',
     booked_at: tool.bookedAt || null,
     last_returned_at: tool.lastReturnedAt || null,
-    logs: tool.logs || [] // Persist logs as JSONB
+    logs: tool.logs || []
   };
 };
 
@@ -75,7 +83,7 @@ const mapDbToTool = (dbTool: any): Tool => ({
   mainPhoto: dbTool.main_photo || undefined,
   notes: dbTool.notes || '',
   dateOfPurchase: dbTool.date_of_purchase || undefined,
-  numberOfItems: dbTool.number_of_items || 1,
+  numberOfItems: dbTool.numberOfItems || 1,
   logs: Array.isArray(dbTool.logs) ? dbTool.logs : []
 });
 
@@ -89,12 +97,28 @@ export const upsertSingleUser = async (user: User) => {
   if (!supabase) return;
   
   const fullData = mapUserToDb(user);
-  const { error } = await supabase
-    .from('users')
-    .upsert(fullData, { onConflict: 'id' });
   
-  if (error) {
-    throw new Error(`Sync Error: ${error.message}`);
+  try {
+    const { error } = await supabase
+      .from('users')
+      .upsert(fullData, { onConflict: 'id' });
+    
+    if (error) {
+      // If the error is specifically about the missing column, 
+      // try one more time without that specific field
+      if (error.message.includes('must_change_password')) {
+        const { must_change_password, ...safeData } = fullData;
+        const { error: retryError } = await supabase
+          .from('users')
+          .upsert(safeData, { onConflict: 'id' });
+        if (retryError) throw retryError;
+      } else {
+        throw error;
+      }
+    }
+  } catch (err: any) {
+    console.error("Supabase Upsert User Critical Error:", err);
+    throw new Error(`Sync Error: ${err.message}`);
   }
 };
 

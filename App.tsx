@@ -229,6 +229,12 @@ const App: React.FC = () => {
       // Verification successful, find user and log in
       const user = allUsers.find(u => u.email.toLowerCase() === email.toLowerCase());
       if (user) {
+        // If they still have a temp password, they MUST change it via standard login first
+        // to maintain security chain of custody
+        if (user.password?.startsWith(TEMP_PASSWORD_PREFIX)) {
+          setSyncError("Temporary password detected. Please log in with password once.");
+          return;
+        }
         handleLogin(user, true);
       } else {
         throw new Error("Linked user no longer exists.");
@@ -301,6 +307,11 @@ const App: React.FC = () => {
   };
 
   const handleLogin = (user: User, remember: boolean) => {
+    // Check if the user has a temporary password prefix
+    if (user.password?.startsWith(TEMP_PASSWORD_PREFIX)) {
+      user.mustChangePassword = true;
+    }
+    
     setCurrentUser(user);
     if (remember) localStorage.setItem('et_user', JSON.stringify(user));
   };
@@ -453,9 +464,21 @@ const App: React.FC = () => {
   const handleForgotPassword = async (email: string): Promise<string> => {
     const user = allUsers.find(u => u.email.toLowerCase() === email.trim().toLowerCase());
     if (!user) throw new Error(`Staff email not found.`);
-    const tempPass = TEMP_PASSWORD_PREFIX + Math.floor(1000 + Math.random() * 9000);
-    const updatedUser = { ...user, password: tempPass, mustChangePassword: true };
+    
+    // Generate an 8-digit unique code for the reset
+    const tempPass = TEMP_PASSWORD_PREFIX + Math.floor(10000000 + Math.random() * 90000000);
+    const updatedUser = { 
+      ...user, 
+      password: tempPass, 
+      mustChangePassword: true 
+    };
+    
+    // Attempt the upsert
     await upsertSingleUser(updatedUser);
+    
+    // Refresh local state immediately
+    setAllUsers(prev => prev.map(u => u.id === user.id ? updatedUser : u));
+    
     return tempPass;
   };
 
@@ -927,19 +950,33 @@ const MandatoryPasswordChange: React.FC<{ user: User; onUpdate: (u: User) => voi
     if (newPassword.length < 6) { setError("Min 6 characters."); return; }
     if (newPassword !== confirmPassword) { setError("Keys do not match."); return; }
     setIsDone(true);
+    // Explicitly strip the temp prefix and set the flag to false
     onUpdate({ ...user, password: newPassword, mustChangePassword: false });
   };
   return (
     <div className="fixed inset-0 z-[500] bg-neda-navy flex items-center justify-center p-6 animate-in fade-in">
-      <div className="bg-white w-full max-w-sm rounded-[2.5rem] p-10 shadow-2xl text-center relative overflow-hidden">
-        {isDone ? (<div className="py-8"><CheckCircle2 size={48} className="text-green-500 mx-auto mb-6" /><h2 className="text-xl font-black text-neda-navy uppercase">Key Activated</h2></div>) : (
-          <><ShieldAlert size={48} className="text-neda-orange mx-auto mb-6" /><h2 className="text-xl font-black text-neda-navy uppercase mb-8">Set Secure Access Key</h2>
+      <div className="bg-white w-full max-w-sm rounded-[3rem] p-10 shadow-2xl text-center relative overflow-hidden">
+        {isDone ? (
+          <div className="py-8 animate-in zoom-in-95">
+            <CheckCircle2 size={48} className="text-green-500 mx-auto mb-6" />
+            <h2 className="text-xl font-black text-neda-navy uppercase">Security Active</h2>
+            <p className="text-[10px] font-bold text-slate-400 uppercase mt-2 tracking-widest">Login refreshed successfully</p>
+          </div>
+        ) : (
+          <>
+            <div className="bg-neda-navy/5 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6">
+              <ShieldAlert size={32} className="text-neda-orange" />
+            </div>
+            <h2 className="text-xl font-black text-neda-navy uppercase mb-2 leading-tight">Secure Your Profile</h2>
+            <p className="text-[10px] font-bold text-slate-400 uppercase mb-8 tracking-widest leading-relaxed">Please update your access key before continuing</p>
             <form onSubmit={handleSubmit} className="space-y-4">
-              <input type="password" placeholder="New Password" required className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm" value={newPassword} onChange={e => setNewPassword(e.target.value)} />
-              <input type="password" placeholder="Confirm Key" required className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} />
-              {error && <p className="text-red-500 text-[9px] font-black uppercase">{error}</p>}
-              <button type="submit" className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg">Activate Key</button>
-            </form></>)}
+              <input type="password" placeholder="New Password" required className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm text-center outline-none focus:ring-2 focus:ring-neda-navy/5" value={newPassword} onChange={e => setNewPassword(e.target.value)} />
+              <input type="password" placeholder="Confirm Key" required className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm text-center outline-none focus:ring-2 focus:ring-neda-navy/5" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} />
+              {error && <div className="flex items-center justify-center gap-1.5 text-red-500"><AlertCircle size={12} /><p className="text-[9px] font-black uppercase tracking-widest">{error}</p></div>}
+              <button type="submit" className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all">Activate Key</button>
+            </form>
+          </>
+        )}
       </div>
     </div>
   );
@@ -954,11 +991,24 @@ const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, onBiometricLogi
   const [forgotEmail, setForgotEmail] = useState('');
   const [tempPassResult, setTempPassResult] = useState<string | null>(null);
   const [isResetting, setIsResetting] = useState(false);
+  const [copySuccess, setCopySuccess] = useState(false);
   
   const handleSignIn = (e: React.FormEvent) => {
     e.preventDefault();
     const user = users.find((u: User) => u.email.toLowerCase() === email.trim().toLowerCase());
-    if (user && user.password === password) { onLogin(user, rememberMe); } else { setError('Invalid Credentials.'); }
+    if (user && user.password === password) { 
+      onLogin(user, rememberMe); 
+    } else { 
+      setError('Invalid Credentials.'); 
+    }
+  };
+
+  const handleCopy = () => {
+    if (tempPassResult) {
+      navigator.clipboard.writeText(tempPassResult);
+      setCopySuccess(true);
+      setTimeout(() => setCopySuccess(false), 2000);
+    }
   };
 
   return (
@@ -991,20 +1041,74 @@ const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, onBiometricLogi
           </div>
         </form>
       </div>
+
       {showForgotModal && (
         <div className="fixed inset-0 z-[600] bg-neda-navy/90 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in">
           <div className="bg-white w-full max-w-sm rounded-t-[3rem] sm:rounded-[3rem] p-10 pb-12 shadow-2xl text-center">
-            <Key size={32} className="text-neda-orange mx-auto mb-6" />
             {tempPassResult ? (
-              <div className="animate-in zoom-in-95"><h2 className="text-xl font-black text-neda-navy uppercase mb-4">Key Generated</h2><p className="text-[10px] font-bold text-slate-400 uppercase mb-6">Temporary Key:</p><div className="bg-slate-50 p-6 rounded-2xl border border-dashed border-neda-orange/30 mb-8"><p className="text-xl font-mono font-black text-neda-orange tracking-[0.2em]">{tempPassResult}</p></div><button onClick={() => setShowForgotModal(false)} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase shadow-lg">Login</button></div>
+              <div className="animate-in zoom-in-95">
+                <div className="bg-green-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6">
+                  <Key size={32} className="text-green-600" />
+                </div>
+                <h2 className="text-xl font-black text-neda-navy uppercase mb-2">Access Restored</h2>
+                <p className="text-[10px] font-bold text-slate-400 uppercase mb-8 tracking-widest">Your temporary key is ready</p>
+                
+                <div 
+                  onClick={handleCopy}
+                  className="bg-slate-50 p-6 rounded-2xl border-2 border-dashed border-slate-200 mb-8 relative group cursor-pointer active:bg-slate-100 transition-all"
+                >
+                  <p className="text-base font-mono font-black text-neda-navy tracking-[0.1em]">{tempPassResult}</p>
+                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-neda-orange text-white text-[8px] font-black px-3 py-1 rounded-full uppercase tracking-tighter shadow-sm flex items-center gap-1.5">
+                    {copySuccess ? <><CheckCircle size={10} /> Copied</> : <><Copy size={10} /> Tap to Copy</>}
+                  </div>
+                </div>
+
+                <div className="bg-neda-navy/5 p-4 rounded-xl mb-8 flex items-start gap-3 text-left">
+                  <Info size={16} className="text-neda-navy shrink-0 mt-0.5" />
+                  <p className="text-[9px] font-bold text-neda-navy/60 uppercase leading-relaxed tracking-wider">
+                    Use this key once to sign in. You will then be prompted to set a permanent secure password.
+                  </p>
+                </div>
+
+                <button onClick={() => setShowForgotModal(false)} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all">Sign In Now</button>
+              </div>
             ) : (
-              <div><h2 className="text-xl font-black text-neda-navy uppercase mb-2">Reset Request</h2><p className="text-[10px] font-bold text-slate-400 uppercase mb-8 tracking-widest">Enter work email</p>
-                <form onSubmit={async (e) => { e.preventDefault(); setIsResetting(true); try { const t = await onForgotPassword(forgotEmail); setTempPassResult(t); } catch(err:any) { setError(err.message); } finally { setIsResetting(false); } }} className="space-y-4">
-                  <input type="email" placeholder="Email" required className="w-full p-5 bg-slate-50 rounded-2xl font-bold text-center outline-none shadow-inner" value={forgotEmail} onChange={e => setForgotEmail(e.target.value)} />
-                  {error && <p className="text-red-500 text-[9px] font-black uppercase">{error}</p>}
-                  <button type="submit" disabled={isResetting} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase shadow-lg disabled:opacity-50">{isResetting ? <Loader2 className="animate-spin mx-auto" /> : "Verify Staff"}</button>
-                  <button type="button" onClick={() => setShowForgotModal(false)} className="w-full py-3 text-slate-400 text-[10px] font-black uppercase">Cancel</button>
-                </form></div>
+              <div>
+                <div className="bg-neda-navy/5 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6">
+                  <Key size={32} className="text-neda-orange" />
+                </div>
+                <h2 className="text-xl font-black text-neda-navy uppercase mb-2">Reset Request</h2>
+                <p className="text-[10px] font-bold text-slate-400 uppercase mb-10 tracking-widest">Enter your work email address</p>
+                <form onSubmit={async (e) => { 
+                  e.preventDefault(); 
+                  setIsResetting(true); 
+                  setError('');
+                  try { 
+                    const t = await onForgotPassword(forgotEmail); 
+                    setTempPassResult(t); 
+                  } catch(err:any) { 
+                    setError(err.message); 
+                  } finally { 
+                    setIsResetting(false); 
+                  } 
+                }} className="space-y-4">
+                  <div className="relative">
+                    <Mail className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
+                    <input type="email" placeholder="Work Email" required className="w-full py-5 pl-14 pr-6 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-center outline-none shadow-inner" value={forgotEmail} onChange={e => setForgotEmail(e.target.value)} />
+                  </div>
+                  {error && (
+                    <div className="bg-red-50 p-4 rounded-xl border border-red-100">
+                      <p className="text-red-500 text-[9px] font-black uppercase tracking-widest text-center leading-relaxed">
+                        {error}
+                      </p>
+                    </div>
+                  )}
+                  <button type="submit" disabled={isResetting} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg disabled:opacity-50 active:scale-95 transition-all">
+                    {isResetting ? <Loader2 className="animate-spin mx-auto" /> : "Verify Identity"}
+                  </button>
+                  <button type="button" onClick={() => setShowForgotModal(false)} className="w-full py-3 text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] mt-2">Cancel Request</button>
+                </form>
+              </div>
             )}
           </div>
         </div>
@@ -1226,7 +1330,7 @@ const MyToolsView: React.FC<any> = ({ tools, currentUser, onInitiateReturn, onVi
           className={`w-full p-6 rounded-[2rem] border flex items-center justify-between transition-all active:scale-95 ${
             hasLinkedBiometrics 
             ? 'bg-green-50 border-green-100 text-green-700 opacity-60' 
-            : 'bg-white border-neda-navy/10 text-neda-navy hover:bg-slate-50'
+            : 'bg-white border-neda-navy/10 text-neda-navy hover:bg-slate-50 shadow-sm'
           }`}
         >
           <div className="flex items-center gap-4">
