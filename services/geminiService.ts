@@ -51,18 +51,11 @@ export const searchAddresses = async (query: string): Promise<string[]> => {
   
   try {
     // We use gemini-2.5-flash as it supports googleMaps grounding
-    // Aggressive prompt to ensure we get narrowing results for NZ addresses
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
-      contents: `Perform a REAL-TIME street address search for New Zealand. 
-      The user has typed: "${query}". 
-      List 5 unique and actual street addresses in NZ that strictly match or expand this prefix. 
-      
-      RULES:
-      - ONLY New Zealand addresses.
-      - MUST be real street addresses (Number, Street, Suburb, City).
-      - Return ONLY a plain text list, one address per line.
-      - NO numbers, NO bullet points, NO extra text.`,
+      contents: `Search for real-world street addresses in New Zealand that start with or match: "${query}". 
+      Return a plain list of the 5 most likely full addresses. 
+      Important: Return ONLY the address strings, one per line. No bullets, no numbers, no explanations.`,
       config: {
         tools: [{ googleMaps: {} }],
       },
@@ -70,39 +63,49 @@ export const searchAddresses = async (query: string): Promise<string[]> => {
 
     const text = response.text || "";
     
-    // Improved parsing for list-style outputs
-    const rawLines = text.split('\n');
-    const addresses = rawLines
+    // Improved parsing to handle markdown, numbers, or extra text
+    const lines = text.split('\n');
+    const addresses = lines
       .map(line => {
-        // Remove markdown bullets, numbering, or leading/trailing whitespace
+        // Remove markdown bullets (*, -) and numbered list patterns (1., 1) )
         let cleaned = line.replace(/^[\*\-\s\d\.\)]+/, '').trim();
-        // Remove any trailing punctuation
-        cleaned = cleaned.replace(/[.,;]$/, '').trim();
+        // Remove any trailing punctuation if it looks like a list
+        cleaned = cleaned.replace(/[,;]$/, '').trim();
         return cleaned;
       })
       .filter(line => {
-        // High quality filters: minimum length and must contain a space (number/street separation)
-        return line.length > 8 && line.includes(' ');
+        // NZ addresses are usually at least "number street, suburb, city" length
+        return line.length > 10 && (line.toLowerCase().includes('nz') || line.toLowerCase().includes('new zealand') || line.split(',').length >= 2);
       });
 
-    if (addresses.length > 0) {
-      // Return top 5, ensuring they are unique
-      return Array.from(new Set(addresses)).slice(0, 5);
-    }
+    if (addresses.length > 0) return addresses.slice(0, 5);
     
-    // Fallback: Check grounding metadata directly if text generation is verbose or fails
-    const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks as any[] | undefined;
+    // If text parsing failed but we have grounding metadata, let's try to extract from there
+    const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
     if (chunks && chunks.length > 0) {
        const chunkAddresses = chunks
          .map((c: any) => c.maps?.title || c.web?.title)
-         .filter((t: any): t is string => typeof t === 'string' && t.length > 8)
+         .filter((t: string) => t && t.length > 10)
          .slice(0, 5);
-       if (chunkAddresses.length > 0) return Array.from(new Set(chunkAddresses));
+       if (chunkAddresses.length > 0) return chunkAddresses;
     }
     
-    return [];
+    throw new Error("No addresses parsed from model output.");
   } catch (error) {
-    console.error("Address Search API Error:", error);
-    return [];
+    console.error("Address Search Error, trying fallback:", error);
+    // If Maps tool fails or doesn't return useful data, try a basic model call as fallback
+    try {
+      const fallbackResponse = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: `List 5 real street addresses in New Zealand starting with "${query}". 
+        Be very specific. Format: text only, one full address per line. No numbers or bullets.`
+      });
+      return (fallbackResponse.text || "")
+        .split('\n')
+        .map(l => l.replace(/^[\*\-\s\d\.\)]+/, '').trim())
+        .filter(l => l.length > 10);
+    } catch {
+      return [];
+    }
   }
 };
