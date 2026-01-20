@@ -1,13 +1,13 @@
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
-// Import 'cwd' directly from 'node:process' to ensure proper type resolution in the Node.js context of the Vite config
-import { cwd } from 'node:process';
+// Import the 'process' module from 'node:process' to access cwd() reliably in the Node.js context of the Vite configuration
+import process from 'node:process';
 
 export default defineConfig(({ mode }) => {
   // loadEnv(mode, path, prefixes) 
   // Passing '' as the 3rd argument allows loading variables without the VITE_ prefix
-  // Fix: Use the imported 'cwd()' function to correctly locate the environment files in the project root
-  const env = loadEnv(mode, cwd(), '');
+  // Fix: Use process.cwd() instead of the named import 'cwd' which might not be exported from 'node:process' depending on the environment
+  const env = loadEnv(mode, process.cwd(), '');
   
   return {
     plugins: [react()],

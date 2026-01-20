@@ -3,7 +3,8 @@ export enum ToolStatus {
   AVAILABLE = 'AVAILABLE',
   BOOKED_OUT = 'BOOKED_OUT',
   UNDER_REPAIR = 'UNDER_REPAIR',
-  DEFECTIVE = 'DEFECTIVE'
+  DEFECTIVE = 'DEFECTIVE',
+  GETTING_SERVICED = 'GETTING_SERVICED'
 }
 
 export enum UserRole {
@@ -31,6 +32,7 @@ export interface ToolLog {
   site?: string;
   comment?: string;
   photo?: string;
+  condition?: string;
 }
 
 export interface Tool {

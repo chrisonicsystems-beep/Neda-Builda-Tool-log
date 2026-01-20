@@ -43,7 +43,9 @@ import {
   PlusCircle,
   Wrench,
   Camera,
-  MessageSquare
+  MessageSquare,
+  ClipboardCheck,
+  Stethoscope
 } from 'lucide-react';
 import { analyzeTools, searchAddresses } from './services/geminiService';
 import { fetchTools, fetchUsers, syncTools, syncUsers, upsertSingleTool, upsertSingleUser, deleteSingleUser, supabase } from './services/supabaseService';
@@ -218,12 +220,18 @@ const App: React.FC = () => {
     }
   };
 
-  const handleReturnTool = async (comment: string, photo?: string) => {
+  const handleReturnTool = async (comment: string, condition: string, photo?: string) => {
     if (!returningTool || !currentUser) return;
     
+    // Determine status based on condition
+    let newStatus = ToolStatus.AVAILABLE;
+    if (condition === 'defect identified' || condition === 'needs service') {
+      newStatus = ToolStatus.GETTING_SERVICED;
+    }
+
     const updatedTool: Tool = {
       ...returningTool,
-      status: ToolStatus.AVAILABLE,
+      status: newStatus,
       currentHolderId: undefined,
       currentHolderName: undefined,
       bookedAt: undefined,
@@ -234,6 +242,7 @@ const App: React.FC = () => {
         action: 'RETURN',
         timestamp: Date.now(),
         comment: comment.trim(),
+        condition: condition,
         photo: photo
       }]
     };
@@ -375,6 +384,7 @@ const App: React.FC = () => {
           allUsers={allUsers} 
           onUpdateUser={updateUser} 
           onDeleteUser={handleDeleteUser}
+          onUpdateTool={updateTool}
           onShowAddUser={() => setShowAddUser(true)}
           onShowAddTool={() => setShowAddTool(true)}
           userRole={currentUser.role}
@@ -398,8 +408,9 @@ const App: React.FC = () => {
 
 // --- Modals ---
 
-const ReturnToolModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (comment: string, photo?: string) => void }> = ({ tool, onClose, onConfirm }) => {
+const ReturnToolModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (comment: string, condition: string, photo?: string) => void }> = ({ tool, onClose, onConfirm }) => {
   const [comment, setComment] = useState('');
+  const [condition, setCondition] = useState('good');
   const [photo, setPhoto] = useState<string | undefined>(undefined);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -426,6 +437,19 @@ const ReturnToolModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (c
         </div>
         
         <div className="space-y-5">
+          <div className="space-y-1">
+            <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest pl-1">Condition</span>
+            <select 
+              className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-xs outline-none focus:ring-2 focus:ring-neda-navy/5 transition-all"
+              value={condition}
+              onChange={e => setCondition(e.target.value)}
+            >
+              <option value="good">Good</option>
+              <option value="defect identified">Defect Identified</option>
+              <option value="needs service">Needs Service</option>
+            </select>
+          </div>
+
           <div className="space-y-1">
             <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest pl-1">Condition/Comments</span>
             <div className="relative">
@@ -470,7 +494,7 @@ const ReturnToolModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (c
           </div>
 
           <button 
-            onClick={() => onConfirm(comment, photo)} 
+            onClick={() => onConfirm(comment, condition, photo)} 
             className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-xl shadow-neda-navy/20 active:scale-95 transition-all"
           >
             Complete Return
@@ -853,7 +877,10 @@ const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, status
                    <span className="text-[7px] font-black uppercase tracking-widest text-neda-orange bg-neda-lightOrange px-1.5 py-0.5 rounded-sm">
                      {tool.category}
                    </span>
-                   <div className={`w-1.5 h-1.5 rounded-full ${tool.status === ToolStatus.AVAILABLE ? 'bg-green-500' : 'bg-orange-500 animate-pulse'}`}></div>
+                   <div className={`w-1.5 h-1.5 rounded-full ${
+                     tool.status === ToolStatus.AVAILABLE ? 'bg-green-500' : 
+                     tool.status === ToolStatus.GETTING_SERVICED ? 'bg-red-500' : 'bg-orange-500 animate-pulse'
+                   }`}></div>
                 </div>
                 
                 <h3 className="font-black text-neda-navy text-sm uppercase tracking-tight truncate">
@@ -864,7 +891,7 @@ const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, status
                    <div className="flex items-center gap-1.5">
                       <UserIcon size={10} className="text-slate-300" />
                       <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider truncate max-w-[90px]">
-                        {tool.currentHolderName || 'Warehouse'}
+                        {tool.status === ToolStatus.GETTING_SERVICED ? 'Maintenance' : (tool.currentHolderName || 'Warehouse')}
                       </span>
                    </div>
                    <div className="flex items-center gap-1.5">
@@ -888,6 +915,12 @@ const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, status
                   {tool.status === ToolStatus.AVAILABLE ? 'Book Out' : 'Return'}
                 </button>
               )}
+              {tool.status === ToolStatus.GETTING_SERVICED && (
+                <div className="shrink-0 flex items-center gap-1 px-3 py-1.5 bg-red-50 text-red-600 rounded-lg text-[8px] font-black uppercase tracking-wider border border-red-100">
+                  <Stethoscope size={10} />
+                  Service
+                </div>
+              )}
             </div>
           ))
         ) : (
@@ -901,8 +934,10 @@ const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, status
   );
 };
 
-const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDeleteUser, onShowAddUser, onShowAddTool, userRole, currentUserId }) => {
+const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDeleteUser, onUpdateTool, onShowAddUser, onShowAddTool, userRole, currentUserId }) => {
   const [activeTab, setActiveTab] = useState<'USERS' | 'STOCKTAKE' | 'REPORTS'>('USERS');
+
+  const servicedTools = useMemo(() => tools.filter((t: Tool) => t.status === ToolStatus.GETTING_SERVICED), [tools]);
 
   const handleDownloadCSV = () => {
     const headers = ["Tool Name", "Category", "Serial Number", "Status", "Current Holder", "Current Site"];
@@ -925,6 +960,21 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
     document.body.removeChild(link);
   };
 
+  const handleClearService = (tool: Tool) => {
+    onUpdateTool({
+      ...tool,
+      status: ToolStatus.AVAILABLE,
+      logs: [...(tool.logs || []), {
+        id: Math.random().toString(36).substr(2, 9),
+        userId: currentUserId,
+        userName: 'Admin',
+        action: 'RETURN',
+        timestamp: Date.now(),
+        comment: 'Maintenance completed. Returned to available stock.'
+      }]
+    });
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex gap-4 border-b border-slate-100 pb-2 overflow-x-auto hide-scrollbar whitespace-nowrap">
@@ -932,6 +982,37 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
         <button onClick={() => setActiveTab('STOCKTAKE')} className={`pb-2 text-[10px] font-black uppercase tracking-widest flex-shrink-0 ${activeTab === 'STOCKTAKE' ? 'text-neda-orange border-b-2 border-neda-orange' : 'text-slate-400'}`}>Stocktake</button>
         <button onClick={() => setActiveTab('REPORTS')} className={`pb-2 text-[10px] font-black uppercase tracking-widest flex-shrink-0 ${activeTab === 'REPORTS' ? 'text-neda-orange border-b-2 border-neda-orange' : 'text-slate-400'}`}>Analytics</button>
       </div>
+
+      {/* Service Alerts Section */}
+      {servicedTools.length > 0 && (
+        <div className="bg-red-50 border border-red-100 rounded-[2rem] p-6 animate-in fade-in slide-in-from-top-2">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-10 h-10 bg-red-100 rounded-xl flex items-center justify-center text-red-600">
+              <AlertCircle size={24} />
+            </div>
+            <div>
+              <h4 className="font-black text-red-900 uppercase text-xs tracking-tight">Maintenance Required</h4>
+              <p className="text-[8px] font-bold text-red-500 uppercase tracking-widest">{servicedTools.length} Item(s) out of service</p>
+            </div>
+          </div>
+          <div className="space-y-3">
+            {servicedTools.map((t: Tool) => (
+              <div key={t.id} className="bg-white p-4 rounded-xl flex items-center justify-between shadow-sm border border-red-50">
+                <div className="min-w-0">
+                  <p className="font-black text-neda-navy text-[11px] uppercase truncate">{t.name}</p>
+                  <p className="text-[8px] font-bold text-slate-400 uppercase tracking-wider">{t.logs[t.logs.length-1]?.condition || 'Check Required'}</p>
+                </div>
+                <button 
+                  onClick={() => handleClearService(t)}
+                  className="px-3 py-1.5 bg-neda-navy text-white rounded-lg font-black text-[9px] uppercase tracking-wider shadow-sm active:scale-95"
+                >
+                  Clear Service
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {activeTab === 'USERS' && (
         <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2">
@@ -1005,7 +1086,10 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
                     <p className="font-black text-neda-navy text-xs uppercase tracking-tight">{t.name}</p>
                     <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{t.currentSite || 'Warehouse'}</p>
                   </div>
-                  <div className={`text-[8px] font-black uppercase px-2 py-1 rounded-md ${t.status === 'AVAILABLE' ? 'text-green-600 bg-green-50' : 'text-orange-600 bg-orange-50'}`}>{t.status.replace('_', ' ')}</div>
+                  <div className={`text-[8px] font-black uppercase px-2 py-1 rounded-md ${
+                    t.status === 'AVAILABLE' ? 'text-green-600 bg-green-50' : 
+                    t.status === 'GETTING_SERVICED' ? 'text-red-600 bg-red-50' : 'text-orange-600 bg-orange-50'
+                  }`}>{t.status.replace('_', ' ')}</div>
                 </div>
               ))}
             </div>
