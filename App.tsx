@@ -57,7 +57,9 @@ import {
   ChevronRight,
   ListFilter,
   CalendarDays,
-  ChevronUp
+  ChevronUp,
+  ArrowUpAz,
+  ArrowDownAz
 } from 'lucide-react';
 import { analyzeTools, searchAddresses } from './services/geminiService';
 import { fetchTools, fetchUsers, syncTools, syncUsers, upsertSingleTool, upsertSingleUser, deleteSingleUser, supabase } from './services/supabaseService';
@@ -77,6 +79,7 @@ const App: React.FC = () => {
   
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<ToolStatus | 'ALL'>('ALL');
+  const [sortOrder, setSortOrder] = useState<'ASC' | 'DESC' | 'NONE'>('NONE');
   const [showFilters, setShowFilters] = useState(false);
   
   const [isBiometricSupported, setIsBiometricSupported] = useState(false);
@@ -430,12 +433,20 @@ const App: React.FC = () => {
   };
 
   const filteredTools = useMemo(() => {
-    return tools.filter(t => {
+    let result = tools.filter(t => {
       const matchesSearch = t.name.toLowerCase().includes(searchTerm.toLowerCase()) || (t.currentHolderName || '').toLowerCase().includes(searchTerm.toLowerCase());
       const matchesStatus = statusFilter === 'ALL' || t.status === statusFilter;
       return matchesSearch && matchesStatus;
     });
-  }, [tools, searchTerm, statusFilter]);
+
+    if (sortOrder === 'ASC') {
+      result = [...result].sort((a, b) => a.name.localeCompare(b.name));
+    } else if (sortOrder === 'DESC') {
+      result = [...result].sort((a, b) => b.name.localeCompare(a.name));
+    }
+
+    return result;
+  }, [tools, searchTerm, statusFilter, sortOrder]);
 
   if (isInitializing) return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 p-6 text-center">
@@ -455,6 +466,14 @@ const App: React.FC = () => {
       hasLinkedBiometrics={hasLinkedBiometrics}
     />
   );
+
+  const toggleSort = () => {
+    setSortOrder(prev => {
+      if (prev === 'NONE') return 'ASC';
+      if (prev === 'ASC') return 'DESC';
+      return 'NONE';
+    });
+  };
 
   return (
     <Layout activeView={view} setView={setView} userRole={currentUser.role} onLogout={handleLogout}>
@@ -502,6 +521,8 @@ const App: React.FC = () => {
           setSearchTerm={setSearchTerm}
           statusFilter={statusFilter} 
           setStatusFilter={setStatusFilter}
+          sortOrder={sortOrder}
+          toggleSort={toggleSort}
           showFilters={showFilters}
           setShowFilters={setShowFilters}
           currentUser={currentUser}
@@ -805,7 +826,7 @@ const ReturnToolModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (c
   };
   return (
     <div className="fixed inset-0 z-[700] bg-neda-navy/95 backdrop-blur-md flex items-center justify-center p-6 animate-in fade-in">
-      <div className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 shadow-2xl animate-in zoom-in-95">
+      <div className="bg-white w-full max-sm rounded-[2.5rem] p-8 shadow-2xl animate-in zoom-in-95">
         <div className="flex justify-between items-center mb-6">
           <div className="flex flex-col">
             <span className="text-[8px] font-black text-neda-orange uppercase tracking-widest mb-1">Confirm Return</span>
@@ -970,12 +991,32 @@ const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, onBiometricLogi
   );
 };
 
-const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, statusFilter, setStatusFilter, showFilters, setShowFilters, currentUser, onInitiateBookOut, onInitiateReturn, onViewDetail }) => (
+const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, statusFilter, setStatusFilter, sortOrder, toggleSort, showFilters, setShowFilters, currentUser, onInitiateBookOut, onInitiateReturn, onViewDetail }) => (
   <div className="space-y-6">
     <div className="relative">
       <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-      <input type="text" placeholder="Search equipment..." className="w-full pl-12 pr-4 py-4 bg-white border border-slate-100 rounded-2xl font-bold text-xs outline-none shadow-sm transition-all" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
-      <button onClick={() => setShowFilters(!showFilters)} className={`absolute right-3 top-1/2 -translate-y-1/2 p-2 rounded-xl transition-colors ${showFilters ? 'bg-neda-navy text-white' : 'text-slate-400'}`}><Filter size={18} /></button>
+      <input 
+        type="text" 
+        placeholder="Search equipment..." 
+        className="w-full pl-12 pr-24 py-4 bg-white border border-slate-100 rounded-2xl font-bold text-xs outline-none shadow-sm transition-all" 
+        value={searchTerm} 
+        onChange={(e) => setSearchTerm(e.target.value)} 
+      />
+      <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
+        <button 
+          onClick={toggleSort} 
+          className={`p-2 rounded-xl transition-all ${sortOrder !== 'NONE' ? 'bg-neda-orange/10 text-neda-orange' : 'text-slate-400 hover:bg-slate-50'}`}
+          title={sortOrder === 'ASC' ? 'Sorting A-Z' : sortOrder === 'DESC' ? 'Sorting Z-A' : 'Default Sort'}
+        >
+          {sortOrder === 'DESC' ? <ArrowDownAz size={18} /> : <ArrowUpAz size={18} />}
+        </button>
+        <button 
+          onClick={() => setShowFilters(!showFilters)} 
+          className={`p-2 rounded-xl transition-colors ${showFilters ? 'bg-neda-navy text-white' : 'text-slate-400 hover:bg-slate-50'}`}
+        >
+          <Filter size={18} />
+        </button>
+      </div>
     </div>
     <div className="bg-white rounded-[2rem] border border-slate-100 overflow-hidden shadow-sm divide-y divide-slate-50">
       {tools.length > 0 ? tools.map((tool: Tool) => {
