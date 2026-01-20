@@ -120,6 +120,12 @@ export const upsertSingleUser = async (user: User) => {
   }
 };
 
+export const deleteSingleUser = async (userId: string) => {
+  if (!supabase) return;
+  const { error } = await supabase.from('users').delete().eq('id', userId);
+  if (error) throw error;
+};
+
 export const syncTools = async (tools: Tool[]) => {
   if (!supabase || tools.length === 0) return;
   const dbTools = tools.map(mapToolToDb);

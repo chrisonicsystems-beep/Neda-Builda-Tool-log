@@ -39,10 +39,12 @@ import {
   Key,
   Eye,
   EyeOff,
-  Copy
+  Copy,
+  PlusCircle,
+  Wrench
 } from 'lucide-react';
 import { analyzeTools, searchAddresses } from './services/geminiService';
-import { fetchTools, fetchUsers, syncTools, syncUsers, upsertSingleTool, upsertSingleUser, supabase } from './services/supabaseService';
+import { fetchTools, fetchUsers, syncTools, syncUsers, upsertSingleTool, upsertSingleUser, deleteSingleUser, supabase } from './services/supabaseService';
 
 const TEMP_PASSWORD_PREFIX = "NEDA-RESET-";
 const BIOMETRIC_ENROLLED_KEY = "neda_biometric_v1_";
@@ -63,6 +65,10 @@ const App: React.FC = () => {
   
   const [showBiometricEnrollment, setShowBiometricEnrollment] = useState(false);
   const [isBiometricSupported, setIsBiometricSupported] = useState(false);
+
+  // Modal states
+  const [showAddUser, setShowAddUser] = useState(false);
+  const [showAddTool, setShowAddTool] = useState(false);
 
   useEffect(() => {
     const initData = async () => {
@@ -125,8 +131,6 @@ const App: React.FC = () => {
 
   const updateUser = async (updatedUser: User) => {
     setIsSyncing(true);
-    
-    // Immediate local update
     setAllUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
     if (currentUser && currentUser.id === updatedUser.id) {
       setCurrentUser(updatedUser);
@@ -137,10 +141,61 @@ const App: React.FC = () => {
       await upsertSingleUser(updatedUser);
       setSyncSuccess(`Profile for ${updatedUser.name} updated.`);
       setTimeout(() => setSyncSuccess(null), 3000);
-      setSyncError(null);
     } catch (e: any) {
       console.warn("DB update sync warning:", e);
-      // We don't show an error here because local update already happened
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleAddUser = async (newUser: User) => {
+    setIsSyncing(true);
+    try {
+      await upsertSingleUser(newUser);
+      setAllUsers(prev => [...prev, newUser]);
+      setSyncSuccess(`User ${newUser.name} added successfully.`);
+      setTimeout(() => setSyncSuccess(null), 3000);
+      setShowAddUser(false);
+    } catch (e: any) {
+      setSyncError(e.message || "Failed to add user.");
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleAddTool = async (newTool: Tool) => {
+    setIsSyncing(true);
+    try {
+      await upsertSingleTool(newTool);
+      setTools(prev => [...prev, newTool]);
+      setSyncSuccess(`Tool ${newTool.name} added successfully.`);
+      setTimeout(() => setSyncSuccess(null), 3000);
+      setShowAddTool(false);
+    } catch (e: any) {
+      setSyncError(e.message || "Failed to add tool.");
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleDeleteUser = async (userToDelete: User) => {
+    if (!currentUser) return;
+    if (userToDelete.id === currentUser.id) {
+      setSyncError("Cannot delete your own account.");
+      return;
+    }
+
+    const confirmed = window.confirm(`Are you sure you want to delete ${userToDelete.name}? This action cannot be undone.`);
+    if (!confirmed) return;
+
+    setIsSyncing(true);
+    try {
+      await deleteSingleUser(userToDelete.id);
+      setAllUsers(prev => prev.filter(u => u.id !== userToDelete.id));
+      setSyncSuccess(`User ${userToDelete.name} removed.`);
+      setTimeout(() => setSyncSuccess(null), 3000);
+    } catch (e: any) {
+      setSyncError(e.message || "Deletion failed.");
     } finally {
       setIsSyncing(false);
     }
@@ -153,7 +208,6 @@ const App: React.FC = () => {
       setTools(prev => prev.map(t => t.id === updatedTool.id ? updatedTool : t));
       setSyncSuccess(`${updatedTool.name} updated.`);
       setTimeout(() => setSyncSuccess(null), 3000);
-      setSyncError(null);
     } catch (e: any) {
       setSyncError(e.message || "Update Failed");
     } finally {
@@ -163,17 +217,10 @@ const App: React.FC = () => {
 
   const handleForgotPassword = async (email: string): Promise<string> => {
     const user = allUsers.find(u => u.email.toLowerCase() === email.trim().toLowerCase());
-    
-    if (!user) {
-      throw new Error(`Email "${email}" not found.`);
-    }
+    if (!user) throw new Error(`Email "${email}" not found.`);
 
     const tempPass = TEMP_PASSWORD_PREFIX + Math.floor(1000 + Math.random() * 9000);
-    const updatedUser = {
-      ...user,
-      password: tempPass,
-      mustChangePassword: true
-    };
+    const updatedUser = { ...user, password: tempPass, mustChangePassword: true };
 
     setIsSyncing(true);
     try {
@@ -226,10 +273,7 @@ const App: React.FC = () => {
   return (
     <Layout activeView={view} setView={setView} userRole={currentUser.role} onLogout={handleLogout}>
       {currentUser.mustChangePassword && (
-        <MandatoryPasswordChange 
-          user={currentUser} 
-          onUpdate={updateUser} 
-        />
+        <MandatoryPasswordChange user={currentUser} onUpdate={updateUser} />
       )}
 
       {showBiometricEnrollment && (
@@ -244,18 +288,8 @@ const App: React.FC = () => {
               Secure your access with Face ID or Touch ID for instant entry next time.
             </p>
             <div className="space-y-4">
-              <button 
-                onClick={handleEnrollBiometric}
-                className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all"
-              >
-                Secure Account
-              </button>
-              <button 
-                onClick={() => setShowBiometricEnrollment(false)}
-                className="w-full py-3 text-slate-400 text-[10px] font-black uppercase tracking-[0.2em]"
-              >
-                Maybe Later
-              </button>
+              <button onClick={handleEnrollBiometric} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all">Secure Account</button>
+              <button onClick={() => setShowBiometricEnrollment(false)} className="w-full py-3 text-slate-400 text-[10px] font-black uppercase tracking-[0.2em]">Maybe Later</button>
             </div>
           </div>
         </div>
@@ -283,6 +317,9 @@ const App: React.FC = () => {
         )}
       </div>
 
+      {showAddUser && <AddUserModal onClose={() => setShowAddUser(false)} onSave={handleAddUser} />}
+      {showAddTool && <AddToolModal onClose={() => setShowAddTool(false)} onSave={handleAddTool} />}
+
       {view === 'INVENTORY' && (
         <InventoryView 
           tools={filteredTools} 
@@ -302,7 +339,11 @@ const App: React.FC = () => {
           tools={tools} 
           allUsers={allUsers} 
           onUpdateUser={updateUser} 
+          onDeleteUser={handleDeleteUser}
+          onShowAddUser={() => setShowAddUser(true)}
+          onShowAddTool={() => setShowAddTool(true)}
           userRole={currentUser.role}
+          currentUserId={currentUser.id}
         />
       )}
 
@@ -318,6 +359,120 @@ const App: React.FC = () => {
     </Layout>
   );
 };
+
+// --- Modals for Adding ---
+
+const AddUserModal: React.FC<{ onClose: () => void; onSave: (u: User) => void }> = ({ onClose, onSave }) => {
+  const [formData, setFormData] = useState({
+    name: '',
+    email: '',
+    password: 'password123',
+    role: UserRole.USER
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSave({
+      id: 'U' + Math.floor(Math.random() * 100000),
+      ...formData,
+      isEnabled: true,
+      mustChangePassword: true
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-[700] bg-neda-navy/90 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in">
+      <div className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 shadow-2xl">
+        <div className="flex justify-between items-center mb-6">
+          <h2 className="text-xl font-black text-neda-navy uppercase tracking-tight">Add New Staff</h2>
+          <button onClick={onClose} className="p-2 text-slate-300 hover:text-neda-navy transition-colors"><X size={20} /></button>
+        </div>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-1">
+            <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest pl-1">Full Name</span>
+            <input required className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm outline-none" placeholder="John Doe" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
+          </div>
+          <div className="space-y-1">
+            <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest pl-1">Email Address</span>
+            <input required type="email" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm outline-none" placeholder="john@nedabuilda.com" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} />
+          </div>
+          <div className="space-y-1">
+            <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest pl-1">Access Role</span>
+            <select className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm outline-none appearance-none" value={formData.role} onChange={e => setFormData({...formData, role: e.target.value as UserRole})}>
+              <option value={UserRole.USER}>User (Book/Return)</option>
+              <option value={UserRole.MANAGER}>Manager (Admin Lite)</option>
+              <option value={UserRole.ADMIN}>Admin (Full Control)</option>
+            </select>
+          </div>
+          <button type="submit" className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg mt-4 active:scale-95 transition-all">Create Profile</button>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+const AddToolModal: React.FC<{ onClose: () => void; onSave: (t: Tool) => void }> = ({ onClose, onSave }) => {
+  const [formData, setFormData] = useState({
+    name: '',
+    category: 'Power Tools',
+    serialNumber: '',
+    notes: '',
+    dateOfPurchase: new Date().toISOString().split('T')[0],
+    numberOfItems: 1
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSave({
+      id: 'T' + Math.floor(Math.random() * 100000),
+      ...formData,
+      status: ToolStatus.AVAILABLE,
+      logs: []
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-[700] bg-neda-navy/90 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in">
+      <div className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 shadow-2xl max-h-[90vh] overflow-y-auto hide-scrollbar">
+        <div className="flex justify-between items-center mb-6">
+          <h2 className="text-xl font-black text-neda-navy uppercase tracking-tight">Add Equipment</h2>
+          <button onClick={onClose} className="p-2 text-slate-300 hover:text-neda-navy transition-colors"><X size={20} /></button>
+        </div>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-1">
+            <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest pl-1">Tool Name</span>
+            <input required className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm outline-none" placeholder="e.g. DeWalt 18V Drill" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
+          </div>
+          <div className="space-y-1">
+            <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest pl-1">Category</span>
+            <select className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm outline-none appearance-none" value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})}>
+              <option value="Power Tools">Power Tools</option>
+              <option value="Precision">Precision</option>
+              <option value="Power">Power</option>
+              <option value="PPE">PPE</option>
+              <option value="Hand Tools">Hand Tools</option>
+            </select>
+          </div>
+          <div className="space-y-1">
+            <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest pl-1">Serial Number</span>
+            <input className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm outline-none" placeholder="SN-123456" value={formData.serialNumber} onChange={e => setFormData({...formData, serialNumber: e.target.value})} />
+          </div>
+          <div className="space-y-1">
+            <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest pl-1">Purchase Date</span>
+            <input type="date" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm outline-none" value={formData.dateOfPurchase} onChange={e => setFormData({...formData, dateOfPurchase: e.target.value})} />
+          </div>
+          <div className="space-y-1">
+            <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest pl-1">Quantity</span>
+            <input type="number" min="1" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm outline-none" value={formData.numberOfItems} onChange={e => setFormData({...formData, numberOfItems: parseInt(e.target.value)})} />
+          </div>
+          <button type="submit" className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg mt-4 active:scale-95 transition-all">Register Asset</button>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+// --- Standard Screens ---
 
 const MandatoryPasswordChange: React.FC<{ user: User; onUpdate: (u: User) => void }> = ({ user, onUpdate }) => {
   const [newPassword, setNewPassword] = useState('');
@@ -411,7 +566,6 @@ const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, users, isBiomet
   const [isBiometricAvailable, setIsBiometricAvailable] = useState(false);
 
   useEffect(() => {
-    // Check if any user is enrolled on this device
     const checkEnrolled = () => {
       const keys = Object.keys(localStorage);
       const isEnrolled = keys.some(k => k.startsWith(BIOMETRIC_ENROLLED_KEY));
@@ -432,21 +586,15 @@ const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, users, isBiomet
 
   const handleBiometricLogin = async () => {
     try {
-      // Simulate/Trigger biometric challenge
-      // In a real environment with WebAuthn, this would involve navigator.credentials.get
-      // For this implementation, we check the last remembered user if enrolled
       const savedUserStr = localStorage.getItem('et_user');
       if (savedUserStr) {
         const savedUser = JSON.parse(savedUserStr);
         const enrollmentKey = BIOMETRIC_ENROLLED_KEY + savedUser.email;
         if (localStorage.getItem(enrollmentKey)) {
-          // Success simulated - in production, the device OS would handle this
           onLogin(savedUser, true);
           return;
         }
       }
-      
-      // If no saved user, ask for email first or show info
       setError("Please sign in with password first to enable device biometrics.");
       setTimeout(() => setError(""), 3000);
     } catch (err) {
@@ -478,53 +626,23 @@ const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, users, isBiomet
         
         <form onSubmit={handleSignIn} className="w-full space-y-4">
           <div className="space-y-1">
-            <input 
-              type="email" 
-              placeholder="Email Address" 
-              required 
-              className="w-full bg-[#f8faff] border border-slate-100 rounded-2xl py-5 px-6 text-slate-700 font-bold text-center focus:ring-4 focus:ring-neda-navy/5 outline-none transition-all"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
+            <input type="email" placeholder="Email Address" required className="w-full bg-[#f8faff] border border-slate-100 rounded-2xl py-5 px-6 text-slate-700 font-bold text-center focus:ring-4 focus:ring-neda-navy/5 outline-none transition-all" value={email} onChange={(e) => setEmail(e.target.value)} />
           </div>
           <div className="space-y-1">
-            <input 
-              type="password" 
-              placeholder="Password" 
-              required 
-              className="w-full bg-[#f8faff] border border-slate-100 rounded-2xl py-5 px-6 text-slate-700 font-bold text-center focus:ring-4 focus:ring-neda-navy/5 outline-none transition-all"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
+            <input type="password" placeholder="Password" required className="w-full bg-[#f8faff] border border-slate-100 rounded-2xl py-5 px-6 text-slate-700 font-bold text-center focus:ring-4 focus:ring-neda-navy/5 outline-none transition-all" value={password} onChange={(e) => setPassword(e.target.value)} />
           </div>
-
           {error && <p className="text-red-500 text-[10px] font-black uppercase tracking-widest animate-pulse">{error}</p>}
-          
           <div className="flex justify-between items-center px-2 mb-4">
             <label className="flex items-center gap-2 cursor-pointer group">
               <input type="checkbox" checked={rememberMe} onChange={e => setRememberMe(e.target.checked)} className="w-4 h-4 rounded border-slate-200 text-neda-navy focus:ring-0" />
               <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest group-hover:text-slate-600 transition-colors">Keep Signed In</span>
             </label>
-            <button 
-              type="button" 
-              onClick={() => { setShowForgotModal(true); setTempPassResult(null); setError(''); }}
-              className="text-neda-orange text-[10px] font-black uppercase tracking-widest hover:opacity-70 transition-opacity"
-            >
-              Forgot Key?
-            </button>
+            <button type="button" onClick={() => { setShowForgotModal(true); setTempPassResult(null); setError(''); }} className="text-neda-orange text-[10px] font-black uppercase tracking-widest hover:opacity-70 transition-opacity">Forgot Key?</button>
           </div>
-
           <div className="flex flex-col gap-3">
-            <button type="submit" className="w-full bg-neda-navy text-white py-6 rounded-2xl font-black text-xl uppercase shadow-xl hover:shadow-neda-navy/20 active:scale-95 transition-all">
-              Sign In
-            </button>
-
+            <button type="submit" className="w-full bg-neda-navy text-white py-6 rounded-2xl font-black text-xl uppercase shadow-xl hover:shadow-neda-navy/20 active:scale-95 transition-all">Sign In</button>
             {isBiometricAvailable && (
-              <button 
-                type="button" 
-                onClick={handleBiometricLogin}
-                className="w-full bg-slate-50 text-neda-navy border border-slate-200 py-5 rounded-2xl font-black text-xs uppercase flex items-center justify-center gap-3 hover:bg-slate-100 transition-colors"
-              >
+              <button type="button" onClick={handleBiometricLogin} className="w-full bg-slate-50 text-neda-navy border border-slate-200 py-5 rounded-2xl font-black text-xs uppercase flex items-center justify-center gap-3 hover:bg-slate-100 transition-colors">
                 <Fingerprint size={18} className="text-neda-orange" />
                 Biometric Login
               </button>
@@ -532,27 +650,19 @@ const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, users, isBiomet
           </div>
         </form>
       </div>
-
       {showForgotModal && (
         <div className="fixed inset-0 z-[600] bg-neda-navy/90 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in">
           <div className="bg-white w-full max-w-sm rounded-t-[3rem] sm:rounded-[3rem] p-10 pb-12 shadow-2xl text-center animate-in slide-in-from-bottom-10">
-            <div className="mx-auto w-16 h-16 bg-neda-lightOrange rounded-2xl flex items-center justify-center mb-6">
-              <Key size={32} className="text-neda-orange" />
-            </div>
-            
+            <div className="mx-auto w-16 h-16 bg-neda-lightOrange rounded-2xl flex items-center justify-center mb-6"><Key size={32} className="text-neda-orange" /></div>
             {tempPassResult ? (
               <div className="animate-in zoom-in-95">
                 <h2 className="text-xl font-black text-neda-navy uppercase mb-4 tracking-tight">Key Generated</h2>
                 <p className="text-[10px] font-bold text-slate-400 uppercase leading-relaxed mb-6 tracking-widest">Copy your temporary access key:</p>
-                <div className="bg-slate-50 p-6 rounded-2xl border border-dashed border-neda-orange/30 mb-8 group relative cursor-pointer active:scale-95 transition-all" onClick={() => {
-                  navigator.clipboard.writeText(tempPassResult);
-                }}>
+                <div className="bg-slate-50 p-6 rounded-2xl border border-dashed border-neda-orange/30 mb-8 group relative cursor-pointer active:scale-95 transition-all" onClick={() => { navigator.clipboard.writeText(tempPassResult); }}>
                   <p className="text-xl font-mono font-black text-neda-orange tracking-[0.2em]">{tempPassResult}</p>
                   <Copy size={12} className="absolute right-4 top-4 text-slate-300 group-hover:text-neda-orange" />
                 </div>
-                <button onClick={() => setShowForgotModal(false)} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg">
-                  Proceed to Login
-                </button>
+                <button onClick={() => setShowForgotModal(false)} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg">Proceed to Login</button>
               </div>
             ) : (
               <div>
@@ -561,9 +671,7 @@ const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, users, isBiomet
                 <form onSubmit={handleResetSubmit} className="space-y-4">
                   <input type="email" placeholder="Work Email" required className="w-full p-5 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-center focus:ring-4 focus:ring-neda-navy/5 outline-none" value={forgotEmail} onChange={e => setForgotEmail(e.target.value)} />
                   {error && <p className="text-red-500 text-[9px] font-black uppercase tracking-widest">{error}</p>}
-                  <button type="submit" disabled={isResetting} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg disabled:opacity-50">
-                    {isResetting ? <Loader2 className="animate-spin mx-auto" size={20} /> : "Generate Key"}
-                  </button>
+                  <button type="submit" disabled={isResetting} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg disabled:opacity-50">{isResetting ? <Loader2 className="animate-spin mx-auto" size={20} /> : "Generate Key"}</button>
                   <button type="button" onClick={() => setShowForgotModal(false)} className="w-full py-3 text-slate-400 text-[10px] font-black uppercase tracking-[0.3em]">Cancel</button>
                 </form>
               </div>
@@ -571,10 +679,7 @@ const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, users, isBiomet
           </div>
         </div>
       )}
-
-      <div className="mt-10 opacity-30">
-        <p className="text-[8px] font-black uppercase tracking-[0.5em] text-neda-navy">Pulse Core | Powered by Chrisonic</p>
-      </div>
+      <div className="mt-10 opacity-30"><p className="text-[8px] font-black uppercase tracking-[0.5em] text-neda-navy">Pulse Core | Powered by Chrisonic</p></div>
     </div>
   );
 };
@@ -647,7 +752,7 @@ const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, status
   );
 };
 
-const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, userRole }) => {
+const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDeleteUser, onShowAddUser, onShowAddTool, userRole, currentUserId }) => {
   const [activeTab, setActiveTab] = useState<'USERS' | 'STOCKTAKE' | 'REPORTS'>('USERS');
 
   const handleDownloadCSV = () => {
@@ -660,7 +765,6 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, userRole
       `"${(t.currentHolderName || 'Warehouse').replace(/"/g, '""')}"`,
       `"${(t.currentSite || 'Warehouse').replace(/"/g, '""')}"`
     ]);
-    
     const csvContent = [headers.join(","), ...rows.map((e: string[]) => e.join(","))].join("\n");
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -681,47 +785,70 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, userRole
       </div>
 
       {activeTab === 'USERS' && (
-        <div className="grid gap-3">
-          {allUsers.map((user: User) => (
-            <div key={user.id} className="bg-white p-5 rounded-[2rem] border border-slate-100 flex items-center justify-between shadow-sm">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-2xl bg-slate-50 flex items-center justify-center border border-slate-100"><UserIcon className="text-slate-400" size={20} /></div>
-                <div className="flex flex-col">
-                  <h4 className="font-black text-neda-navy text-sm tracking-tight">{user.name}</h4>
-                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{user.role}</p>
+        <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2">
+          <button 
+            onClick={onShowAddUser}
+            className="w-full flex items-center justify-between p-6 bg-slate-50 border border-dashed border-slate-200 rounded-[2rem] hover:bg-slate-100 transition-colors"
+          >
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-white flex items-center justify-center text-neda-navy shadow-sm"><UserPlus size={24} /></div>
+              <div className="text-left">
+                <h4 className="font-black text-neda-navy uppercase text-xs tracking-tight">Onboard New Staff</h4>
+                <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Create secure access profile</p>
+              </div>
+            </div>
+            <PlusCircle size={24} className="text-neda-orange" />
+          </button>
+
+          <div className="grid gap-3">
+            {allUsers.map((user: User) => (
+              <div key={user.id} className="bg-white p-5 rounded-[2rem] border border-slate-100 flex items-center justify-between shadow-sm">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-2xl bg-slate-50 flex items-center justify-center border border-slate-100"><UserIcon className="text-slate-400" size={20} /></div>
+                  <div className="flex flex-col">
+                    <h4 className="font-black text-neda-navy text-sm tracking-tight">{user.name}</h4>
+                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{user.role}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {user.mustChangePassword && <span className="bg-orange-50 text-neda-orange px-3 py-1.5 rounded-lg text-[8px] font-black uppercase tracking-wider border border-neda-orange/10">Key Pending</span>}
+                  {user.id !== currentUserId && (
+                    <button onClick={() => onDeleteUser(user)} className="p-2 text-slate-300 hover:text-red-500 transition-colors" title="Delete User"><Trash2 size={18} /></button>
+                  )}
                 </div>
               </div>
-              {user.mustChangePassword && <span className="bg-orange-50 text-neda-orange px-3 py-1.5 rounded-lg text-[8px] font-black uppercase tracking-wider border border-neda-orange/10">Key Pending</span>}
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       )}
 
       {activeTab === 'STOCKTAKE' && (
-        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2">
+        <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2">
+          <button 
+            onClick={onShowAddTool}
+            className="w-full flex items-center justify-between p-6 bg-slate-50 border border-dashed border-slate-200 rounded-[2rem] hover:bg-slate-100 transition-colors"
+          >
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-white flex items-center justify-center text-neda-navy shadow-sm"><Wrench size={24} /></div>
+              <div className="text-left">
+                <h4 className="font-black text-neda-navy uppercase text-xs tracking-tight">Register New Equipment</h4>
+                <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Add to company inventory</p>
+              </div>
+            </div>
+            <PlusCircle size={24} className="text-neda-orange" />
+          </button>
+
           <div className="bg-neda-navy p-8 rounded-[2.5rem] text-white shadow-xl relative overflow-hidden">
              <div className="relative z-10">
                <h3 className="text-xl font-black uppercase tracking-tight mb-2">Inventory Export</h3>
-               <p className="text-[10px] font-bold text-slate-400 uppercase leading-relaxed mb-6 max-w-[200px]">
-                 Generate a detailed CSV report of all company assets, holders, and locations.
-               </p>
-               <button 
-                 onClick={handleDownloadCSV}
-                 className="flex items-center gap-3 px-6 py-4 bg-neda-orange text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg active:scale-95 transition-all"
-               >
-                 <Download size={18} />
-                 Download CSV
-               </button>
+               <p className="text-[10px] font-bold text-slate-400 uppercase leading-relaxed mb-6 max-w-[200px]">Generate a detailed CSV report of all company assets, holders, and locations.</p>
+               <button onClick={handleDownloadCSV} className="flex items-center gap-3 px-6 py-4 bg-neda-orange text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg active:scale-95 transition-all"><Download size={18} />Download CSV</button>
              </div>
-             <div className="absolute top-1/2 -right-4 -translate-y-1/2 opacity-10">
-                <FileSpreadsheet size={160} />
-             </div>
+             <div className="absolute top-1/2 -right-4 -translate-y-1/2 opacity-10"><FileSpreadsheet size={160} /></div>
           </div>
 
           <div className="bg-white rounded-[2rem] border border-slate-100 overflow-hidden shadow-sm">
-            <div className="px-6 py-4 bg-slate-50 border-b border-slate-100">
-              <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Inventory Status Summary</h4>
-            </div>
+            <div className="px-6 py-4 bg-slate-50 border-b border-slate-100"><h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Inventory Status Summary</h4></div>
             <div className="divide-y divide-slate-50">
               {tools.map((t: Tool) => (
                 <div key={t.id} className="px-6 py-4 flex items-center justify-between">
@@ -729,9 +856,7 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, userRole
                     <p className="font-black text-neda-navy text-xs uppercase tracking-tight">{t.name}</p>
                     <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{t.currentSite || 'Warehouse'}</p>
                   </div>
-                  <div className={`text-[8px] font-black uppercase px-2 py-1 rounded-md ${t.status === 'AVAILABLE' ? 'text-green-600 bg-green-50' : 'text-orange-600 bg-orange-50'}`}>
-                    {t.status.replace('_', ' ')}
-                  </div>
+                  <div className={`text-[8px] font-black uppercase px-2 py-1 rounded-md ${t.status === 'AVAILABLE' ? 'text-green-600 bg-green-50' : 'text-orange-600 bg-orange-50'}`}>{t.status.replace('_', ' ')}</div>
                 </div>
               ))}
             </div>
@@ -741,9 +866,7 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, userRole
 
       {activeTab === 'REPORTS' && (
         <div className="p-8 text-center bg-white rounded-[2.5rem] border border-slate-100">
-          <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
-             <ArrowUpRight className="text-slate-300" size={32} />
-          </div>
+          <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4"><ArrowUpRight className="text-slate-300" size={32} /></div>
           <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Enhanced Analytics Coming Soon</p>
         </div>
       )}
@@ -766,16 +889,8 @@ const AIAssistant: React.FC<any> = ({ tools }) => {
     <div className="bg-white p-8 rounded-[3rem] shadow-sm border border-slate-100">
       <h2 className="text-2xl font-black text-neda-navy uppercase flex items-center gap-3 mb-8 tracking-tight"><Sparkles className="text-neda-orange" /> Pulse AI</h2>
       <div className="relative mb-6">
-        <input 
-          placeholder="How many drills are out?" 
-          className="w-full p-5 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-xs focus:ring-4 focus:ring-neda-navy/5 outline-none transition-all" 
-          value={query} 
-          onChange={e => setQuery(e.target.value)} 
-          onKeyPress={(e) => e.key === 'Enter' && handleAsk()}
-        />
-        <button onClick={handleAsk} className="absolute right-2 top-2 p-3 bg-neda-navy text-white rounded-xl shadow-lg active:scale-95 transition-all">
-          {loading ? <Loader2 className="animate-spin" size={18} /> : <Send size={18} />}
-        </button>
+        <input placeholder="How many drills are out?" className="w-full p-5 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-xs focus:ring-4 focus:ring-neda-navy/5 outline-none transition-all" value={query} onChange={e => setQuery(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && handleAsk()} />
+        <button onClick={handleAsk} className="absolute right-2 top-2 p-3 bg-neda-navy text-white rounded-xl shadow-lg active:scale-95 transition-all">{loading ? <Loader2 className="animate-spin" size={18} /> : <Send size={18} />}</button>
       </div>
       {reply && <div className="p-6 bg-slate-50 rounded-2xl text-[12px] font-bold text-slate-700 leading-relaxed border border-slate-100 animate-in fade-in">{reply}</div>}
     </div>
@@ -801,12 +916,7 @@ const MyToolsView: React.FC<any> = ({ tools, currentUser, onUpdateTool }) => (
               <span className="text-[8px] font-bold text-slate-300 uppercase mb-0.5 tracking-widest">{tool.category}</span>
               <h3 className="font-black text-neda-navy uppercase text-sm tracking-tight">{tool.name}</h3>
             </div>
-            <button 
-              onClick={() => onUpdateTool({...tool, status: ToolStatus.AVAILABLE, currentHolderId: undefined, currentHolderName: undefined})} 
-              className="px-5 py-2.5 bg-slate-50 text-neda-orange rounded-xl font-black text-[10px] uppercase tracking-wider border border-neda-orange/10 hover:bg-neda-lightOrange transition-colors"
-            >
-              Return
-            </button>
+            <button onClick={() => onUpdateTool({...tool, status: ToolStatus.AVAILABLE, currentHolderId: undefined, currentHolderName: undefined})} className="px-5 py-2.5 bg-slate-50 text-neda-orange rounded-xl font-black text-[10px] uppercase tracking-wider border border-neda-orange/10 hover:bg-neda-lightOrange transition-colors">Return</button>
           </div>
         ))
       )}
