@@ -26,10 +26,9 @@ export const analyzeTools = async (tools: Tool[], query: string): Promise<string
     Instructions:
     1. Be professional, concise, and helpful.
     2. STRICT RELEVANCE: Only provide information directly related to the items or equipment categories mentioned in the user query.
-    3. NO UNRELATED ADVICE: If an item is unavailable, do NOT list unrelated available equipment (e.g., don't suggest drills if they asked for generators).
-    4. ALTERNATIVES: You may suggest logical alternatives ONLY if they are within the same functional category (e.g., suggesting a different sized generator).
-    5. MAINTENANCE INSIGHTS: If relevant to the specific item asked about, mention its health or repair status.
-    6. Formulate your response as a direct answer followed by a brief "Maintenance Insight" or "Pulse Alert" if critical.
+    3. NO UNRELATED ADVICE: If an item is unavailable, do NOT list unrelated available equipment.
+    4. MAINTENANCE INSIGHTS: If relevant to the specific item asked about, mention its health or repair status.
+    5. Formulate your response as a direct answer followed by a brief "Maintenance Insight" or "Pulse Alert" if critical.
   `;
 
   try {
@@ -51,22 +50,56 @@ export const searchAddresses = async (query: string): Promise<string[]> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   try {
+    // We use gemini-2.5-flash as it supports googleMaps grounding
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
-      contents: `Find 5 precise real-world street addresses or project locations in New Zealand (e.g. "123 Queen Street, Auckland") matching the prefix: "${query}". Return ONLY the list of addresses, one per line. Do not include any introductory text, numbers, or bullet points.`,
+      contents: `Act as a high-precision New Zealand address locator. 
+      Find real street addresses in New Zealand that strictly start with or are highly relevant to the prefix: "${query}".
+      Focus on active construction sites, residential, or commercial areas.
+      Return exactly 5 unique full addresses.
+      Format: Plain text only, one address per line. No bullets, no numbers, no markdown formatting, no introductory text.`,
       config: {
         tools: [{ googleMaps: {} }],
       },
     });
 
     const text = response.text || "";
-    // Robust cleaning: remove Markdown list markers, numbered list prefixes, and trim whitespace
-    return text
-      .split('\n')
-      .map(line => line.replace(/^[\*\-\d\.]+\s*/, '').trim())
-      .filter(line => line.length > 8); // Ensure it looks like a reasonably long address
+    
+    // resilient parsing for lines
+    const lines = text.split('\n');
+    const addresses = lines
+      .map(line => {
+        // Strip out common list artifacts (dots, numbers, dashes, asterisks)
+        let cleaned = line.replace(/^[\*\-\s\d\.\)]+/, '').trim();
+        // Remove trailing punctuation
+        cleaned = cleaned.replace(/[.,;]$/, '').trim();
+        return cleaned;
+      })
+      .filter(line => {
+        // Ensure it's a substantive string and looks like an address (usually has a space for number/street)
+        return line.length > 8 && line.includes(' ');
+      });
+
+    if (addresses.length > 0) {
+      // Return top 5, ensuring they are unique
+      return Array.from(new Set(addresses)).slice(0, 5);
+    }
+    
+    // Fallback: Check grounding metadata if direct text parsing yields nothing
+    // Fix: Explicitly cast groundingChunks to any[] to avoid 'unknown[]' vs 'string[]' mismatch
+    const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks as any[] | undefined;
+    if (chunks && chunks.length > 0) {
+       const chunkAddresses = chunks
+         .map((c: any) => c.maps?.title || c.web?.title)
+         // Fix: Use type guard to ensure t is a string for the resulting array
+         .filter((t: any): t is string => typeof t === 'string' && t.length > 8)
+         .slice(0, 5);
+       if (chunkAddresses.length > 0) return Array.from(new Set(chunkAddresses));
+    }
+    
+    return [];
   } catch (error) {
-    console.error("Address Search Error:", error);
+    console.error("Address Search API Error:", error);
     return [];
   }
 };

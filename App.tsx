@@ -93,10 +93,7 @@ const App: React.FC = () => {
       let finalTools = remoteTools && remoteTools.length > 0 ? remoteTools : INITIAL_TOOLS;
 
       // --- RELATIONAL HEALING (EXCEL-STYLE LOOKUP) ---
-      // This logic ensures that if Supabase has a Name but no ID (as seen in screenshots),
-      // or an ID but no Name, they are linked in the app immediately.
       finalTools = finalTools.map(tool => {
-        // Case 1: We have the ID but missing/wrong Name
         if (tool.currentHolderId) {
           const matchedUser = finalUsers.find(u => String(u.id).trim().toLowerCase() === String(tool.currentHolderId).trim().toLowerCase());
           if (matchedUser) {
@@ -108,7 +105,6 @@ const App: React.FC = () => {
           }
         }
         
-        // Case 2: We have the Name but missing ID (Excel-style VLOOKUP)
         if (tool.currentHolderName && !tool.currentHolderId) {
           const matchedUser = finalUsers.find(u => u.name.trim().toLowerCase() === tool.currentHolderName?.trim().toLowerCase());
           if (matchedUser) {
@@ -171,13 +167,9 @@ const App: React.FC = () => {
       const remoteUsers = await fetchUsers() || INITIAL_USERS;
       const remoteTools = await fetchTools() || INITIAL_TOOLS;
 
-      // Identify tools with Name/ID inconsistencies
       const toolsToFix = remoteTools.filter(tool => {
-        // If it has a holder name but no ID, it needs a lookup fix
         if (tool.currentHolderName && !tool.currentHolderId) return true;
-        // If it has an ID but no name, it needs a metadata fix
         if (tool.currentHolderId && !tool.currentHolderName) return true;
-        // If it's booked out to a user but marked as available
         if (tool.currentHolderId && tool.status === ToolStatus.AVAILABLE) return true;
         return false;
       });
@@ -207,7 +199,6 @@ const App: React.FC = () => {
           await upsertSingleTool(repairedTool);
           repairedCount++;
         } else {
-          // If we can't find the user by ID or Name, reset the tool to Warehouse
           const resetTool: Tool = {
             ...tool,
             status: ToolStatus.AVAILABLE,
@@ -486,26 +477,35 @@ const BookOutModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (tool
   const [addressInput, setAddressInput] = useState('');
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [hasAttemptedSearch, setHasAttemptedSearch] = useState(false);
   const searchTimeoutRef = useRef<number | null>(null);
 
   const handleAddressChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
     setAddressInput(value);
+    
     if (searchTimeoutRef.current) window.clearTimeout(searchTimeoutRef.current);
+    
     if (value.trim().length >= 3) {
       setIsSearching(true);
+      setHasAttemptedSearch(true);
+      // Faster debounce for more immediate feedback
       searchTimeoutRef.current = window.setTimeout(async () => {
         const results = await searchAddresses(value);
+        // We set suggestions even if empty to clear old ones, 
+        // but we don't clear them while we're still waiting for a response
         setSuggestions(results);
         setIsSearching(false);
-      }, 600);
+      }, 350);
     } else {
       setSuggestions([]);
       setIsSearching(false);
+      setHasAttemptedSearch(false);
     }
   };
 
-  const handleSelectSuggestion = (e: React.MouseEvent | React.TouchEvent, addr: string) => {
+  const handleSelectSuggestion = (e: React.PointerEvent<HTMLButtonElement>, addr: string) => {
+    // pointerdown is more reliable on mobile to beat the focus/blur race
     e.preventDefault();
     setAddressInput(addr);
     setSuggestions([]);
@@ -523,24 +523,55 @@ const BookOutModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (tool
         </div>
         <div className="space-y-5">
           <div className="space-y-1 relative">
-            <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest pl-1">Site Address</span>
+            <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest pl-1">Site Address (NZ Only)</span>
             <div className="relative z-[710]">
               <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={16} />
-              <input autoFocus type="text" placeholder="Start typing address..." className="w-full p-4 pl-12 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-xs outline-none focus:ring-2 focus:ring-neda-navy/5" value={addressInput} onChange={handleAddressChange} />
-              {isSearching && <div className="absolute right-4 top-1/2 -translate-y-1/2 bg-slate-50 pl-2"><Loader2 className="animate-spin text-neda-orange" size={14} /></div>}
+              <input 
+                autoFocus 
+                type="text" 
+                placeholder="Start typing street address..." 
+                className="w-full p-4 pl-12 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-xs outline-none focus:ring-2 focus:ring-neda-navy/5" 
+                value={addressInput} 
+                onChange={handleAddressChange} 
+                autoComplete="off"
+              />
+              {isSearching && (
+                <div className="absolute right-4 top-1/2 -translate-y-1/2 bg-slate-50 pl-2">
+                  <Loader2 className="animate-spin text-neda-orange" size={14} />
+                </div>
+              )}
             </div>
-            {suggestions.length > 0 && (
-              <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden z-[720]">
-                {suggestions.map((addr, idx) => (
-                  <button key={idx} onPointerDown={(e) => handleSelectSuggestion(e, addr)} className="w-full text-left px-5 py-4 text-[10px] font-bold text-slate-600 hover:bg-slate-50 flex items-center gap-3">
-                    <Navigation size={10} className="text-neda-orange" />
-                    <span className="truncate">{addr}</span>
-                  </button>
-                ))}
+            
+            {/* Show suggestions list if we have suggestions OR if we are still searching (keep old ones visible for continuity) */}
+            {(suggestions.length > 0 || (hasAttemptedSearch && !isSearching)) && (
+              <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden z-[720] max-h-[220px] overflow-y-auto hide-scrollbar">
+                {suggestions.length > 0 ? (
+                  suggestions.map((addr, idx) => (
+                    <button 
+                      key={idx} 
+                      onPointerDown={(e) => handleSelectSuggestion(e, addr)} 
+                      className="w-full text-left px-5 py-4 text-[10px] font-bold text-slate-600 hover:bg-slate-50 flex items-center gap-3 border-b border-slate-50 last:border-0 active:bg-slate-100 transition-colors"
+                    >
+                      <Navigation size={10} className="text-neda-orange shrink-0" />
+                      <span className="truncate leading-relaxed">{addr}</span>
+                    </button>
+                  ))
+                ) : !isSearching && hasAttemptedSearch && (
+                  <div className="px-5 py-8 text-center flex flex-col items-center gap-2">
+                    <div className="bg-slate-50 p-3 rounded-full"><MapPin size={16} className="text-slate-200" /></div>
+                    <p className="text-[9px] font-black text-slate-300 uppercase tracking-[0.2em]">No addresses found nearby</p>
+                  </div>
+                )}
               </div>
             )}
           </div>
-          <button disabled={addressInput.trim().length < 5} onClick={() => onConfirm(tool, addressInput.trim())} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all disabled:opacity-50">Confirm Assignment</button>
+          <button 
+            disabled={addressInput.trim().length < 5} 
+            onClick={() => onConfirm(tool, addressInput.trim())} 
+            className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all disabled:opacity-40 disabled:grayscale"
+          >
+            Confirm Site Assignment
+          </button>
         </div>
       </div>
     </div>
@@ -669,13 +700,11 @@ const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, users, isBiomet
   const [forgotEmail, setForgotEmail] = useState('');
   const [tempPassResult, setTempPassResult] = useState<string | null>(null);
   const [isResetting, setIsResetting] = useState(false);
-
   const handleSignIn = (e: React.FormEvent) => {
     e.preventDefault();
     const user = users.find((u: User) => u.email.toLowerCase() === email.trim().toLowerCase());
     if (user && user.password === password) { onLogin(user, rememberMe); } else { setError('Invalid Credentials.'); }
   };
-
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-center p-6 text-center">
       <div className="w-full max-w-[420px] bg-white rounded-[3.5rem] p-10 pt-12 pb-14 shadow-2xl flex flex-col items-center">
@@ -752,14 +781,7 @@ const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, status
 const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDeleteUser, onUpdateTool, onShowAddUser, onShowAddTool, onRepairData, userRole, currentUserId, currentUserName }) => {
   const [activeTab, setActiveTab] = useState<'USERS' | 'STOCKTAKE' | 'ACTIVE_BOOKINGS' | 'HEALTH'>('USERS');
   const bookedTools = useMemo(() => tools.filter((t: Tool) => t.status === ToolStatus.BOOKED_OUT), [tools]);
-  
-  // Identify records with name-id mismatches (Excel lookup cases)
-  const unhealthyToolsCount = useMemo(() => tools.filter(t => 
-    (t.currentHolderName && !t.currentHolderId) || 
-    (t.currentHolderId && !t.currentHolderName) ||
-    (t.currentHolderId && t.status === ToolStatus.AVAILABLE)
-  ).length, [tools]);
-
+  const unhealthyToolsCount = useMemo(() => tools.filter(t => (t.currentHolderName && !t.currentHolderId) || (t.currentHolderId && !t.currentHolderName) || (t.currentHolderId && t.status === ToolStatus.AVAILABLE)).length, [tools]);
   return (
     <div className="space-y-6">
       <div className="flex gap-4 border-b border-slate-100 pb-2 overflow-x-auto hide-scrollbar whitespace-nowrap">
@@ -768,7 +790,6 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
         <button onClick={() => setActiveTab('STOCKTAKE')} className={`pb-2 text-[10px] font-black uppercase tracking-widest ${activeTab === 'STOCKTAKE' ? 'text-neda-orange border-b-2 border-neda-orange' : 'text-slate-400'}`}>Assets</button>
         <button onClick={() => setActiveTab('HEALTH')} className={`pb-2 text-[10px] font-black uppercase tracking-widest ${activeTab === 'HEALTH' ? 'text-neda-orange border-b-2 border-neda-orange' : 'text-slate-400'}`}>Health {unhealthyToolsCount > 0 && <span className="bg-red-500 text-white px-1.5 py-0.5 rounded-full text-[7px] ml-1">{unhealthyToolsCount}</span>}</button>
       </div>
-
       {activeTab === 'USERS' && (
         <div className="space-y-4 animate-in fade-in">
           <button onClick={onShowAddUser} className="w-full flex items-center justify-between p-6 bg-slate-50 border border-dashed border-slate-200 rounded-[2rem] hover:bg-slate-100 transition-colors"><div className="flex items-center gap-4"><div className="w-12 h-12 rounded-2xl bg-white flex items-center justify-center text-neda-navy shadow-sm"><UserPlus size={24} /></div><div className="text-left"><h4 className="font-black text-neda-navy uppercase text-xs">Onboard Staff</h4><p className="text-[8px] font-bold text-slate-400 uppercase">Create profile</p></div></div><PlusCircle size={24} className="text-neda-orange" /></button>
@@ -777,7 +798,6 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
           ))}</div>
         </div>
       )}
-
       {activeTab === 'ACTIVE_BOOKINGS' && (
         <div className="space-y-4 animate-in fade-in">
           <div className="bg-white rounded-[2rem] border border-slate-100 overflow-hidden shadow-sm">
@@ -788,7 +808,6 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
           </div>
         </div>
       )}
-
       {activeTab === 'HEALTH' && (
         <div className="space-y-6 animate-in fade-in">
           <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm relative overflow-hidden">
@@ -802,7 +821,6 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
              </div>
              <div className="absolute -right-4 -bottom-4 opacity-5 text-neda-navy"><Database size={160} /></div>
           </div>
-
           <div className="bg-slate-50 p-6 rounded-[2rem] border border-dashed border-slate-200">
              <div className="flex items-center gap-3 mb-4">
                 <Activity size={18} className="text-slate-400" />
