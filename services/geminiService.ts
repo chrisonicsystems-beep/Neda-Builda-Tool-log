@@ -48,19 +48,16 @@ export const searchAddresses = async (
   query: string, 
   coords?: { latitude: number; longitude: number }
 ): Promise<string[]> => {
-  if (!query || query.trim().length < 3) return [];
+  if (!query || query.trim().length < 2) return [];
   
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   try {
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
-      contents: `Act as a high-precision New Zealand address locator. 
-      Find real street addresses in New Zealand that strictly start with or are highly relevant to the search term: "${query}".
-      
-      CRITICAL: Include the house numbers and full street names.
-      Return exactly 5 unique full addresses.
-      Format: Return ONLY the addresses, one per line. Do not use bullets, numbering (like 1. 2. 3.), or any other list markers.`,
+      contents: `Search Google Maps for current, real street addresses in New Zealand matching: "${query}".
+      Focus on providing full street addresses with house numbers.
+      Return exactly 5 unique full addresses as a simple list.`,
       config: {
         tools: [{ googleMaps: {} }],
         toolConfig: coords ? {
@@ -74,40 +71,50 @@ export const searchAddresses = async (
       },
     });
 
-    const text = response.text || "";
+    // Strategy 1: Extract from Grounding Metadata (Most reliable for Maps tool)
+    const groundingAddresses: string[] = [];
+    const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks as any[] | undefined;
     
-    // Split into lines and clean up formatting artifacts
-    const lines = text.split('\n');
-    const addresses = lines
+    if (chunks && chunks.length > 0) {
+      chunks.forEach(chunk => {
+        const title = chunk.maps?.title || chunk.web?.title;
+        const address = chunk.maps?.address;
+        
+        if (title && typeof title === 'string' && title.length > 5) {
+          groundingAddresses.push(title);
+        }
+        if (address && typeof address === 'string' && address.length > 5) {
+          groundingAddresses.push(address);
+        }
+      });
+    }
+
+    // Strategy 2: Parse text output
+    const text = response.text || "";
+    const lines = text.split('\n')
       .map(line => {
-        // IMPROVED REGEX: Only strip list markers (e.g., "1. ", "- ", "* "). 
-        // DO NOT strip leading digits that are part of a house number.
-        let cleaned = line.replace(/^(\d+[\.\)]|[\*\-])\s+/, '').trim();
-        // Remove trailing punctuation
+        // Strip common list markers but keep digits for house numbers
+        let cleaned = line.replace(/^(\d+[\.\)]|[\*\-\•])\s+/, '').trim();
         cleaned = cleaned.replace(/[.,;]$/, '').trim();
         return cleaned;
       })
-      .filter(line => {
-        // Ensure it's a substantive string and looks like an address 
-        // (usually has a space between house number and street name)
-        return line.length > 8 && line.includes(' ');
-      });
+      .filter(line => line.length > 8 && line.includes(' '));
 
-    if (addresses.length > 0) {
-      return Array.from(new Set(addresses)).slice(0, 5);
-    }
-    
-    // Fallback: Check grounding metadata if direct text parsing yields nothing
-    const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks as any[] | undefined;
-    if (chunks && chunks.length > 0) {
-       const chunkAddresses = chunks
-         .map((c: any) => c.maps?.title || c.web?.title)
-         .filter((t: any): t is string => typeof t === 'string' && t.length > 8)
-         .slice(0, 5);
-       if (chunkAddresses.length > 0) return Array.from(new Set(chunkAddresses));
-    }
-    
-    return [];
+    // Combine and deduplicate
+    const allFound = [...groundingAddresses, ...lines];
+    const uniqueAddresses = Array.from(new Set(allFound));
+
+    // Prioritize addresses that contain parts of the search query
+    const queryParts = query.toLowerCase().split(' ').filter(p => p.length > 1);
+    const sorted = uniqueAddresses.sort((a, b) => {
+      const aLower = a.toLowerCase();
+      const bLower = b.toLowerCase();
+      const aMatches = queryParts.filter(p => aLower.includes(p)).length;
+      const bMatches = queryParts.filter(p => bLower.includes(p)).length;
+      return bMatches - aMatches;
+    });
+
+    return sorted.slice(0, 5);
   } catch (error) {
     console.error("Address Search API Error:", error);
     return [];
