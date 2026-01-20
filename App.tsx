@@ -92,21 +92,34 @@ const App: React.FC = () => {
       let finalUsers = remoteUsers && remoteUsers.length > 0 ? remoteUsers : INITIAL_USERS;
       let finalTools = remoteTools && remoteTools.length > 0 ? remoteTools : INITIAL_TOOLS;
 
-      // --- RELATIONAL HEALING ---
-      // Fixes current_holder_name if current_holder_id is present but name is missing or wrong
-      // This ensures visual consistency immediately on load without requiring a DB update
+      // --- RELATIONAL HEALING (EXCEL-STYLE LOOKUP) ---
+      // This logic ensures that if Supabase has a Name but no ID (as seen in screenshots),
+      // or an ID but no Name, they are linked in the app immediately.
       finalTools = finalTools.map(tool => {
+        // Case 1: We have the ID but missing/wrong Name
         if (tool.currentHolderId) {
-          const matchedUser = finalUsers.find(u => String(u.id).trim() === String(tool.currentHolderId).trim());
+          const matchedUser = finalUsers.find(u => String(u.id).trim().toLowerCase() === String(tool.currentHolderId).trim().toLowerCase());
           if (matchedUser) {
             return { 
               ...tool, 
               currentHolderName: matchedUser.name,
-              // If assigned to a user, it must be 'BOOKED_OUT' unless it's in service
               status: tool.status === ToolStatus.AVAILABLE ? ToolStatus.BOOKED_OUT : tool.status
             };
           }
         }
+        
+        // Case 2: We have the Name but missing ID (Excel-style VLOOKUP)
+        if (tool.currentHolderName && !tool.currentHolderId) {
+          const matchedUser = finalUsers.find(u => u.name.trim().toLowerCase() === tool.currentHolderName?.trim().toLowerCase());
+          if (matchedUser) {
+            return { 
+              ...tool, 
+              currentHolderId: matchedUser.id,
+              status: tool.status === ToolStatus.AVAILABLE ? ToolStatus.BOOKED_OUT : tool.status
+            };
+          }
+        }
+        
         return tool;
       });
 
@@ -155,39 +168,46 @@ const App: React.FC = () => {
     setIsSyncing(true);
     let repairedCount = 0;
     try {
-      // Re-fetch to ensure we have the latest state from the server
       const remoteUsers = await fetchUsers() || INITIAL_USERS;
       const remoteTools = await fetchTools() || INITIAL_TOOLS;
 
-      // Filter for tools that have an ID assignment but inconsistent metadata
+      // Identify tools with Name/ID inconsistencies
       const toolsToFix = remoteTools.filter(tool => {
-        if (!tool.currentHolderId) return false;
-        const matchedUser = remoteUsers.find(u => String(u.id).trim() === String(tool.currentHolderId).trim());
-        if (!matchedUser) return true; // Orphaned assignment - fixable by resetting
-        return !tool.currentHolderName || 
-               tool.currentHolderName !== matchedUser.name || 
-               tool.status === ToolStatus.AVAILABLE;
+        // If it has a holder name but no ID, it needs a lookup fix
+        if (tool.currentHolderName && !tool.currentHolderId) return true;
+        // If it has an ID but no name, it needs a metadata fix
+        if (tool.currentHolderId && !tool.currentHolderName) return true;
+        // If it's booked out to a user but marked as available
+        if (tool.currentHolderId && tool.status === ToolStatus.AVAILABLE) return true;
+        return false;
       });
 
       if (toolsToFix.length === 0) {
-        setSyncSuccess("Database integrity verified. No repairs needed.");
+        setSyncSuccess("Inventory integrity verified.");
         setTimeout(() => setSyncSuccess(null), 3000);
         return;
       }
 
       for (const tool of toolsToFix) {
-        const user = remoteUsers.find(u => String(u.id).trim() === String(tool.currentHolderId).trim());
-        if (user) {
-          // Fix: Restore name from User table and force status to Booked Out
+        let matchedUser: User | undefined;
+        
+        if (tool.currentHolderId) {
+          matchedUser = remoteUsers.find(u => String(u.id).trim().toLowerCase() === String(tool.currentHolderId).trim().toLowerCase());
+        } else if (tool.currentHolderName) {
+          matchedUser = remoteUsers.find(u => u.name.trim().toLowerCase() === tool.currentHolderName?.trim().toLowerCase());
+        }
+
+        if (matchedUser) {
           const repairedTool: Tool = { 
             ...tool, 
-            currentHolderName: user.name,
+            currentHolderId: matchedUser.id,
+            currentHolderName: matchedUser.name,
             status: tool.status === ToolStatus.AVAILABLE ? ToolStatus.BOOKED_OUT : tool.status
           };
           await upsertSingleTool(repairedTool);
           repairedCount++;
         } else {
-          // Fix: Reset orphaned assignments to warehouse
+          // If we can't find the user by ID or Name, reset the tool to Warehouse
           const resetTool: Tool = {
             ...tool,
             status: ToolStatus.AVAILABLE,
@@ -201,7 +221,7 @@ const App: React.FC = () => {
       }
 
       await loadData();
-      setSyncSuccess(`Success! Reconciled ${repairedCount} equipment records in Supabase.`);
+      setSyncSuccess(`Healed ${repairedCount} records using Staff Lookup.`);
       setTimeout(() => setSyncSuccess(null), 5000);
     } catch (e: any) {
       setSyncError("Data Repair Error: " + e.message);
@@ -213,11 +233,6 @@ const App: React.FC = () => {
   const handleLogin = (user: User, remember: boolean) => {
     setCurrentUser(user);
     if (remember) localStorage.setItem('et_user', JSON.stringify(user));
-    
-    const enrollmentData = localStorage.getItem(BIOMETRIC_ENROLLED_KEY + user.email);
-    if (isBiometricSupported && !enrollmentData && !user.mustChangePassword) {
-      setTimeout(() => setShowBiometricEnrollment(true), 1500);
-    }
   };
 
   const handleLogout = () => {
@@ -235,7 +250,7 @@ const App: React.FC = () => {
         setCurrentUser(updatedUser);
         localStorage.setItem('et_user', JSON.stringify(updatedUser));
       }
-      setSyncSuccess(`Staff profile updated.`);
+      setSyncSuccess(`Profile updated.`);
       setTimeout(() => setSyncSuccess(null), 3000);
     } catch (e: any) {
       setSyncError("Update Failed: " + e.message);
@@ -249,7 +264,7 @@ const App: React.FC = () => {
     try {
       await upsertSingleUser(newUser);
       setAllUsers(prev => [...prev, newUser]);
-      setSyncSuccess(`Staff member registered.`);
+      setSyncSuccess(`Staff member added.`);
       setShowAddUser(false);
     } catch (e: any) {
       setSyncError("Add Failed: " + e.message);
@@ -263,7 +278,7 @@ const App: React.FC = () => {
     try {
       await upsertSingleTool(newTool);
       setTools(prev => [...prev, newTool]);
-      setSyncSuccess(`Asset registered successfully.`);
+      setSyncSuccess(`Asset registered.`);
       setShowAddTool(false);
     } catch (e: any) {
       setSyncError("Asset Error: " + e.message);
@@ -274,8 +289,7 @@ const App: React.FC = () => {
 
   const handleDeleteUser = async (userToDelete: User) => {
     if (!currentUser) return;
-    const confirmed = window.confirm(`Permanently remove ${userToDelete.name} from the system?`);
-    if (!confirmed) return;
+    if (!window.confirm(`Permanently remove ${userToDelete.name}?`)) return;
 
     setIsSyncing(true);
     try {
@@ -294,7 +308,7 @@ const App: React.FC = () => {
     try {
       await upsertSingleTool(updatedTool);
       setTools(prev => prev.map(t => t.id === updatedTool.id ? updatedTool : t));
-      setSyncSuccess(`Saved.`);
+      setSyncSuccess(`Database Sync Successful.`);
     } catch (e: any) {
       setSyncError("Sync Error: " + e.message);
     } finally {
@@ -360,21 +374,11 @@ const App: React.FC = () => {
 
   const handleForgotPassword = async (email: string): Promise<string> => {
     const user = allUsers.find(u => u.email.toLowerCase() === email.trim().toLowerCase());
-    if (!user) throw new Error(`Staff email "${email}" not found.`);
-
+    if (!user) throw new Error(`Staff email not found.`);
     const tempPass = TEMP_PASSWORD_PREFIX + Math.floor(1000 + Math.random() * 9000);
     const updatedUser = { ...user, password: tempPass, mustChangePassword: true };
-
-    setIsSyncing(true);
-    try {
-      await upsertSingleUser(updatedUser);
-      setAllUsers(prev => prev.map(u => u.id === user.id ? updatedUser : u));
-      return tempPass;
-    } catch (e: any) {
-      throw e;
-    } finally {
-      setIsSyncing(false);
-    }
+    await upsertSingleUser(updatedUser);
+    return tempPass;
   };
 
   const filteredTools = useMemo(() => {
@@ -391,32 +395,24 @@ const App: React.FC = () => {
       <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 p-6 text-center">
         <NedaLogo size={48} className="mb-6 animate-pulse opacity-20" />
         <Loader2 className="w-8 h-8 animate-spin text-neda-navy mb-4" />
-        <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Booting Neda Pulse Core...</p>
+        <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Syncing Engine...</p>
       </div>
     );
   }
 
   if (!currentUser) return (
-    <LoginScreen 
-      onLogin={handleLogin} 
-      onForgotPassword={handleForgotPassword}
-      users={allUsers} 
-      isBiometricSupported={isBiometricSupported} 
-    />
+    <LoginScreen onLogin={handleLogin} onForgotPassword={handleForgotPassword} users={allUsers} isBiometricSupported={isBiometricSupported} />
   );
 
   return (
     <Layout activeView={view} setView={setView} userRole={currentUser.role} onLogout={handleLogout}>
-      {currentUser.mustChangePassword && (
-        <MandatoryPasswordChange user={currentUser} onUpdate={updateUser} />
-      )}
+      {currentUser.mustChangePassword && <MandatoryPasswordChange user={currentUser} onUpdate={updateUser} />}
 
-      {/* Persistent Sync Notification */}
       <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[100] w-full max-w-xs px-4 pointer-events-none">
         {isSyncing && (
           <div className="bg-neda-navy text-white px-4 py-3 rounded-2xl shadow-lg flex items-center justify-center gap-3 animate-in slide-in-from-top-4">
             <Loader2 className="animate-spin" size={16} />
-            <span className="text-[10px] font-black uppercase tracking-widest text-chrisonic-cyan">Updating Database...</span>
+            <span className="text-[10px] font-black uppercase tracking-widest text-chrisonic-cyan">Database Refresh...</span>
           </div>
         )}
         {syncSuccess && (
@@ -474,8 +470,8 @@ const App: React.FC = () => {
       
       {view === 'MY_TOOLS' && (
         <MyToolsView 
-          // RESILIENT FILTER: Handles ID type mismatches and whitespace
-          tools={tools.filter(t => t.currentHolderId && String(t.currentHolderId).trim() === String(currentUser.id).trim())} 
+          // Use Case-insensitive comparison for ID lookup robustness
+          tools={tools.filter(t => t.currentHolderId && String(t.currentHolderId).trim().toLowerCase() === String(currentUser.id).trim().toLowerCase())} 
           currentUser={currentUser} 
           onInitiateReturn={(t: Tool) => setReturningTool(t)}
         />
@@ -689,7 +685,7 @@ const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, users, isBiomet
           <input type="password" placeholder="Password" required className="w-full bg-[#f8faff] border border-slate-100 rounded-2xl py-5 px-6 text-slate-700 font-bold text-center outline-none" value={password} onChange={(e) => setPassword(e.target.value)} />
           {error && <p className="text-red-500 text-[10px] font-black uppercase tracking-widest">{error}</p>}
           <div className="flex justify-between items-center px-2 mb-4">
-            <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={rememberMe} onChange={e => setRememberMe(e.target.checked)} className="w-4 h-4 rounded text-neda-navy" /><span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Keep Signed In</span></label>
+            <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={rememberMe} onChange={e => setRememberMe(e.target.checked)} className="w-4 h-4 rounded text-neda-navy" /><span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Signed In</span></label>
             <button type="button" onClick={() => { setShowForgotModal(true); setTempPassResult(null); setError(''); }} className="text-neda-orange text-[10px] font-black uppercase tracking-widest">Forgot Key?</button>
           </div>
           <button type="submit" className="w-full bg-neda-navy text-white py-6 rounded-2xl font-black text-xl uppercase shadow-xl active:scale-95 transition-all">Sign In</button>
@@ -700,13 +696,13 @@ const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, users, isBiomet
           <div className="bg-white w-full max-w-sm rounded-t-[3rem] sm:rounded-[3rem] p-10 pb-12 shadow-2xl text-center">
             <Key size={32} className="text-neda-orange mx-auto mb-6" />
             {tempPassResult ? (
-              <div className="animate-in zoom-in-95"><h2 className="text-xl font-black text-neda-navy uppercase mb-4">Key Generated</h2><p className="text-[10px] font-bold text-slate-400 uppercase mb-6">Temporary Key:</p><div className="bg-slate-50 p-6 rounded-2xl border border-dashed border-neda-orange/30 mb-8"><p className="text-xl font-mono font-black text-neda-orange tracking-[0.2em]">{tempPassResult}</p></div><button onClick={() => setShowForgotModal(false)} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase shadow-lg">Proceed to Login</button></div>
+              <div className="animate-in zoom-in-95"><h2 className="text-xl font-black text-neda-navy uppercase mb-4">Key Generated</h2><p className="text-[10px] font-bold text-slate-400 uppercase mb-6">Temporary Key:</p><div className="bg-slate-50 p-6 rounded-2xl border border-dashed border-neda-orange/30 mb-8"><p className="text-xl font-mono font-black text-neda-orange tracking-[0.2em]">{tempPassResult}</p></div><button onClick={() => setShowForgotModal(false)} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase shadow-lg">Login</button></div>
             ) : (
               <div><h2 className="text-xl font-black text-neda-navy uppercase mb-2">Reset Request</h2><p className="text-[10px] font-bold text-slate-400 uppercase mb-8 tracking-widest">Enter work email</p>
                 <form onSubmit={async (e) => { e.preventDefault(); setIsResetting(true); try { const t = await onForgotPassword(forgotEmail); setTempPassResult(t); } catch(err:any) { setError(err.message); } finally { setIsResetting(false); } }} className="space-y-4">
                   <input type="email" placeholder="Email" required className="w-full p-5 bg-slate-50 rounded-2xl font-bold text-center outline-none" value={forgotEmail} onChange={e => setForgotEmail(e.target.value)} />
                   {error && <p className="text-red-500 text-[9px] font-black uppercase">{error}</p>}
-                  <button type="submit" disabled={isResetting} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase shadow-lg disabled:opacity-50">{isResetting ? <Loader2 className="animate-spin mx-auto" /> : "Generate Key"}</button>
+                  <button type="submit" disabled={isResetting} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase shadow-lg disabled:opacity-50">{isResetting ? <Loader2 className="animate-spin mx-auto" /> : "Verify Staff"}</button>
                   <button type="button" onClick={() => setShowForgotModal(false)} className="w-full py-3 text-slate-400 text-[10px] font-black uppercase">Cancel</button>
                 </form></div>
             )}
@@ -726,8 +722,8 @@ const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, status
     </div>
     <div className="bg-white rounded-[2rem] border border-slate-100 overflow-hidden shadow-sm divide-y divide-slate-50">
       {tools.length > 0 ? tools.map((tool: Tool) => {
-        const isHeldByMe = tool.status === ToolStatus.BOOKED_OUT && tool.currentHolderId && String(tool.currentHolderId).trim() === String(currentUser.id).trim();
-        const isHeldByOthers = tool.status === ToolStatus.BOOKED_OUT && tool.currentHolderId && String(tool.currentHolderId).trim() !== String(currentUser.id).trim();
+        const isHeldByMe = tool.status === ToolStatus.BOOKED_OUT && tool.currentHolderId && String(tool.currentHolderId).trim().toLowerCase() === String(currentUser.id).trim().toLowerCase();
+        const isHeldByOthers = tool.status === ToolStatus.BOOKED_OUT && tool.currentHolderId && String(tool.currentHolderId).trim().toLowerCase() !== String(currentUser.id).trim().toLowerCase();
         const isAvailable = tool.status === ToolStatus.AVAILABLE;
         const isServiced = tool.status === ToolStatus.GETTING_SERVICED;
         return (
@@ -755,12 +751,12 @@ const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, status
 
 const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDeleteUser, onUpdateTool, onShowAddUser, onShowAddTool, onRepairData, userRole, currentUserId, currentUserName }) => {
   const [activeTab, setActiveTab] = useState<'USERS' | 'STOCKTAKE' | 'ACTIVE_BOOKINGS' | 'HEALTH'>('USERS');
-  const servicedTools = useMemo(() => tools.filter((t: Tool) => t.status === ToolStatus.GETTING_SERVICED), [tools]);
   const bookedTools = useMemo(() => tools.filter((t: Tool) => t.status === ToolStatus.BOOKED_OUT), [tools]);
   
-  // Integrity Audit: Identify records with missing names but present IDs
+  // Identify records with name-id mismatches (Excel lookup cases)
   const unhealthyToolsCount = useMemo(() => tools.filter(t => 
-    (t.currentHolderId && (!t.currentHolderName || t.currentHolderName === 'None')) || 
+    (t.currentHolderName && !t.currentHolderId) || 
+    (t.currentHolderId && !t.currentHolderName) ||
     (t.currentHolderId && t.status === ToolStatus.AVAILABLE)
   ).length, [tools]);
 
@@ -770,12 +766,12 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
         <button onClick={() => setActiveTab('USERS')} className={`pb-2 text-[10px] font-black uppercase tracking-widest ${activeTab === 'USERS' ? 'text-neda-orange border-b-2 border-neda-orange' : 'text-slate-400'}`}>Staff List</button>
         <button onClick={() => setActiveTab('ACTIVE_BOOKINGS')} className={`pb-2 text-[10px] font-black uppercase tracking-widest ${activeTab === 'ACTIVE_BOOKINGS' ? 'text-neda-orange border-b-2 border-neda-orange' : 'text-slate-400'}`}>Bookings</button>
         <button onClick={() => setActiveTab('STOCKTAKE')} className={`pb-2 text-[10px] font-black uppercase tracking-widest ${activeTab === 'STOCKTAKE' ? 'text-neda-orange border-b-2 border-neda-orange' : 'text-slate-400'}`}>Assets</button>
-        <button onClick={() => setActiveTab('HEALTH')} className={`pb-2 text-[10px] font-black uppercase tracking-widest ${activeTab === 'HEALTH' ? 'text-neda-orange border-b-2 border-neda-orange' : 'text-slate-400'}`}>Integrity {unhealthyToolsCount > 0 && <span className="bg-red-500 text-white px-1.5 py-0.5 rounded-full text-[7px] ml-1">{unhealthyToolsCount}</span>}</button>
+        <button onClick={() => setActiveTab('HEALTH')} className={`pb-2 text-[10px] font-black uppercase tracking-widest ${activeTab === 'HEALTH' ? 'text-neda-orange border-b-2 border-neda-orange' : 'text-slate-400'}`}>Health {unhealthyToolsCount > 0 && <span className="bg-red-500 text-white px-1.5 py-0.5 rounded-full text-[7px] ml-1">{unhealthyToolsCount}</span>}</button>
       </div>
 
       {activeTab === 'USERS' && (
         <div className="space-y-4 animate-in fade-in">
-          <button onClick={onShowAddUser} className="w-full flex items-center justify-between p-6 bg-slate-50 border border-dashed border-slate-200 rounded-[2rem] hover:bg-slate-100 transition-colors"><div className="flex items-center gap-4"><div className="w-12 h-12 rounded-2xl bg-white flex items-center justify-center text-neda-navy shadow-sm"><UserPlus size={24} /></div><div className="text-left"><h4 className="font-black text-neda-navy uppercase text-xs">Onboard Staff</h4><p className="text-[8px] font-bold text-slate-400 uppercase">Create access profile</p></div></div><PlusCircle size={24} className="text-neda-orange" /></button>
+          <button onClick={onShowAddUser} className="w-full flex items-center justify-between p-6 bg-slate-50 border border-dashed border-slate-200 rounded-[2rem] hover:bg-slate-100 transition-colors"><div className="flex items-center gap-4"><div className="w-12 h-12 rounded-2xl bg-white flex items-center justify-center text-neda-navy shadow-sm"><UserPlus size={24} /></div><div className="text-left"><h4 className="font-black text-neda-navy uppercase text-xs">Onboard Staff</h4><p className="text-[8px] font-bold text-slate-400 uppercase">Create profile</p></div></div><PlusCircle size={24} className="text-neda-orange" /></button>
           <div className="grid gap-3">{allUsers.map((user: User) => (
             <div key={user.id} className="bg-white p-5 rounded-[2rem] border border-slate-100 flex items-center justify-between shadow-sm"><div className="flex items-center gap-4"><div className="w-12 h-12 rounded-2xl bg-slate-50 flex items-center justify-center"><UserIcon className="text-slate-400" size={20} /></div><div><h4 className="font-black text-neda-navy text-sm">{user.name}</h4><p className="text-[9px] font-bold text-slate-400 uppercase">{user.role}</p></div></div>{user.id !== currentUserId && <button onClick={() => onDeleteUser(user)} className="p-2 text-slate-300 hover:text-red-500"><Trash2 size={18} /></button>}</div>
           ))}</div>
@@ -787,18 +783,9 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
           <div className="bg-white rounded-[2rem] border border-slate-100 overflow-hidden shadow-sm">
             <div className="px-6 py-4 bg-slate-50 border-b border-slate-100 flex justify-between items-center"><h4 className="text-[10px] font-black uppercase text-slate-400">Current Assignments</h4><span className="bg-neda-navy text-white text-[8px] font-black px-2 py-0.5 rounded-full">{bookedTools.length} Out</span></div>
             <div className="divide-y divide-slate-50">{bookedTools.length > 0 ? bookedTools.map((t: Tool) => (
-              <div key={t.id} className="px-6 py-5 flex items-center justify-between"><div className="min-w-0 flex-1 pr-4"><p className="font-black text-neda-navy text-xs uppercase truncate">{t.name}</p><div className="flex flex-col gap-0.5 mt-1"><div className="flex items-center gap-1.5 text-slate-400"><UserIcon size={10} /><span className="text-[9px] font-bold uppercase">{t.currentHolderName || 'User ID: ' + t.currentHolderId}</span></div><div className="flex items-center gap-1.5 text-neda-orange"><MapPin size={10} /><span className="text-[9px] font-bold uppercase truncate">{t.currentSite}</span></div></div></div><button onClick={() => { if(window.confirm(`Force return ${t.name}?`)) onUpdateTool({...t, status: ToolStatus.AVAILABLE, currentHolderId: undefined, currentHolderName: undefined, currentSite: undefined, bookedAt: undefined}); }} className="shrink-0 p-2 text-slate-300 hover:text-red-500 transition-all"><RefreshCcw size={18} /></button></div>
+              <div key={t.id} className="px-6 py-5 flex items-center justify-between"><div className="min-w-0 flex-1 pr-4"><p className="font-black text-neda-navy text-xs uppercase truncate">{t.name}</p><div className="flex flex-col gap-0.5 mt-1"><div className="flex items-center gap-1.5 text-slate-400"><UserIcon size={10} /><span className="text-[9px] font-bold uppercase">{t.currentHolderName || 'ID lookup required'}</span></div><div className="flex items-center gap-1.5 text-neda-orange"><MapPin size={10} /><span className="text-[9px] font-bold uppercase truncate">{t.currentSite}</span></div></div></div><button onClick={() => { if(window.confirm(`Force return ${t.name}?`)) onUpdateTool({...t, status: ToolStatus.AVAILABLE, currentHolderId: undefined, currentHolderName: undefined, currentSite: undefined, bookedAt: undefined}); }} className="shrink-0 p-2 text-slate-300 hover:text-red-500 transition-all"><RefreshCcw size={18} /></button></div>
             )) : <div className="px-6 py-12 text-center text-slate-300 font-black uppercase text-[10px]">No active bookings</div>}</div>
           </div>
-        </div>
-      )}
-
-      {activeTab === 'STOCKTAKE' && (
-        <div className="space-y-4 animate-in fade-in">
-          <button onClick={onShowAddTool} className="w-full flex items-center justify-between p-6 bg-slate-50 border border-dashed border-slate-200 rounded-[2rem] hover:bg-slate-100 transition-colors"><div className="flex items-center gap-4"><div className="w-12 h-12 rounded-2xl bg-white flex items-center justify-center text-neda-navy shadow-sm"><Wrench size={24} /></div><div className="text-left"><h4 className="font-black text-neda-navy uppercase text-xs">Register Equipment</h4><p className="text-[8px] font-bold text-slate-400 uppercase">Add to inventory</p></div></div><PlusCircle size={24} className="text-neda-orange" /></button>
-          <div className="bg-white rounded-[2rem] border border-slate-100 overflow-hidden shadow-sm"><div className="px-6 py-4 bg-slate-50 border-b border-slate-100"><h4 className="text-[10px] font-black uppercase text-slate-400">Inventory Status</h4></div><div className="divide-y divide-slate-50">{tools.map(t => (
-            <div key={t.id} className="px-6 py-4 flex items-center justify-between"><div><p className="font-black text-neda-navy text-xs uppercase">{t.name}</p><p className="text-[9px] font-bold text-slate-400 uppercase">{t.currentSite || 'Warehouse'}</p></div><div className={`text-[8px] font-black uppercase px-2 py-1 rounded-md ${t.status === 'AVAILABLE' ? 'text-green-600 bg-green-50' : 'text-orange-600 bg-orange-50'}`}>{t.status.replace('_', ' ')}</div></div>
-          ))}</div></div>
         </div>
       )}
 
@@ -807,10 +794,10 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
           <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm relative overflow-hidden">
              <div className="relative z-10">
                 <h3 className="text-xl font-black text-neda-navy uppercase mb-2">Relational Reconciler</h3>
-                <p className="text-[10px] font-bold text-slate-400 uppercase leading-relaxed mb-8 max-w-[240px]">Use this utility after a bulk upload to ensure tool holder names correctly pull from the staff database based on their unique IDs.</p>
+                <p className="text-[10px] font-bold text-slate-400 uppercase leading-relaxed mb-8 max-w-[240px]">This performs an Excel-style VLOOKUP across your staff list. It finds correct user IDs based on holder names and writes them back to the database to fix toolkit visibility.</p>
                 <button onClick={onRepairData} className="flex items-center gap-4 px-6 py-5 bg-neda-navy text-chrisonic-cyan rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl active:scale-95 transition-all">
                    <Zap size={20} className="text-neda-orange" />
-                   Fix Assignment Metadata
+                   Fix Database IDs
                 </button>
              </div>
              <div className="absolute -right-4 -bottom-4 opacity-5 text-neda-navy"><Database size={160} /></div>
@@ -823,14 +810,14 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
              </div>
              {unhealthyToolsCount > 0 ? (
                 <div className="space-y-2">
-                   {tools.filter(t => (t.currentHolderId && (!t.currentHolderName || t.currentHolderName === 'None' || t.currentHolderName === '' || t.status === ToolStatus.AVAILABLE))).map(t => (
+                   {tools.filter(t => (t.currentHolderName && !t.currentHolderId) || (t.currentHolderId && !t.currentHolderName) || (t.currentHolderId && t.status === ToolStatus.AVAILABLE)).map(t => (
                       <div key={t.id} className="bg-white px-4 py-3 rounded-xl border border-red-100 flex items-center justify-between shadow-sm">
                          <div className="flex flex-col">
                             <span className="text-[11px] font-black text-neda-navy uppercase">{t.name}</span>
-                            <span className="text-[8px] font-bold text-red-400 uppercase">Sync Required</span>
+                            <span className="text-[8px] font-bold text-red-400 uppercase">Lookup Required</span>
                          </div>
                          <div className="flex flex-col items-end">
-                            <span className="text-[9px] font-black text-slate-400">ID: {t.currentHolderId}</span>
+                            <span className="text-[9px] font-black text-slate-400">ID: {t.currentHolderId || 'MISSING'}</span>
                             <span className="text-[9px] font-black text-slate-400">Name: {t.currentHolderName || 'MISSING'}</span>
                          </div>
                       </div>
@@ -839,7 +826,7 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
              ) : (
                 <div className="text-center py-6">
                    <CheckCircle2 size={32} className="text-green-500 mx-auto mb-3 opacity-20" />
-                   <p className="text-[10px] font-black text-green-500 uppercase tracking-widest">Database records are healthy</p>
+                   <p className="text-[10px] font-black text-green-500 uppercase tracking-widest">All records linked correctly</p>
                 </div>
              )}
           </div>
@@ -883,7 +870,7 @@ const MyToolsView: React.FC<any> = ({ tools, currentUser, onInitiateReturn }) =>
       {tools.length === 0 ? (
         <div className="text-center py-16 bg-white rounded-[2rem] border border-dashed border-slate-200">
           <Package size={48} className="mx-auto text-slate-100 mb-4" />
-          <p className="text-slate-300 font-black uppercase text-[10px] tracking-widest">No equipment currently assigned</p>
+          <p className="text-slate-300 font-black uppercase text-[10px] tracking-widest">No equipment linked to your ID</p>
         </div>
       ) : (
         tools.map((tool: Tool) => (
