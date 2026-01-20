@@ -333,7 +333,6 @@ const App: React.FC = () => {
     let newStatus = ToolStatus.AVAILABLE;
     if (condition === 'defect identified' || condition === 'needs service') newStatus = ToolStatus.GETTING_SERVICED;
     
-    // Fix: Explicitly typing the new log to satisfy TypeScript's string literal union for 'action'
     const newLog: ToolLog = {
       id: Math.random().toString(36).substr(2, 9),
       userId: currentUser.id,
@@ -362,7 +361,6 @@ const App: React.FC = () => {
   const handleConfirmBookOut = async (tool: Tool, siteAddress: string) => {
     if (!currentUser) return;
     
-    // Fix: Explicitly typing the new log to satisfy TypeScript's string literal union for 'action'
     const newLog: ToolLog = {
       id: Math.random().toString(36).substr(2, 9),
       userId: currentUser.id,
@@ -389,6 +387,36 @@ const App: React.FC = () => {
     const updatedTool = { ...tool, logs: [log, ...(tool.logs || [])].slice(0, 50) };
     await updateTool(updatedTool);
     if (selectedToolForDetail?.id === tool.id) setSelectedToolForDetail(updatedTool);
+  };
+
+  const handleDownloadCSV = () => {
+    if (!tools || tools.length === 0) return;
+    
+    const headers = ['Tool Name', 'Category', 'Status', 'Serial Number', 'Current Holder', 'Current Site', 'Booked At'];
+    const rows = tools.map(t => {
+      return [
+        `"${t.name.replace(/"/g, '""')}"`,
+        `"${t.category.replace(/"/g, '""')}"`,
+        `"${t.status.replace(/"/g, '""')}"`,
+        `"${(t.serialNumber || '').replace(/"/g, '""')}"`,
+        `"${(t.currentHolderName || 'Warehouse').replace(/"/g, '""')}"`,
+        `"${(t.currentSite || 'Warehouse').replace(/"/g, '""')}"`,
+        t.bookedAt ? `"${new Date(t.bookedAt).toLocaleString()}"` : 'N/A'
+      ];
+    });
+
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `neda_inventory_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setSyncSuccess("Inventory report generated.");
+    setTimeout(() => setSyncSuccess(null), 3000);
   };
 
   const handleForgotPassword = async (email: string): Promise<string> => {
@@ -493,6 +521,7 @@ const App: React.FC = () => {
           onShowAddUser={() => setShowAddUser(true)}
           onShowAddTool={() => setShowAddTool(true)}
           onRepairData={handleRepairData}
+          onDownloadCSV={handleDownloadCSV}
           userRole={currentUser.role}
           currentUserId={currentUser.id}
           currentUserName={currentUser.name}
@@ -977,7 +1006,7 @@ const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, status
   </div>
 );
 
-const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDeleteUser, onUpdateTool, onShowAddUser, onShowAddTool, onRepairData, userRole, currentUserId, onViewDetail }) => {
+const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDeleteUser, onUpdateTool, onShowAddUser, onShowAddTool, onRepairData, onDownloadCSV, userRole, currentUserId, onViewDetail }) => {
   const [activeTab, setActiveTab] = useState<'USERS' | 'STOCKTAKE' | 'ACTIVE_BOOKINGS' | 'HEALTH'>('USERS');
   const [assetSearch, setAssetSearch] = useState('');
   const bookedTools = useMemo(() => tools.filter((t: Tool) => t.status === ToolStatus.BOOKED_OUT), [tools]);
@@ -1000,17 +1029,30 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
         </div>
       )}
       {activeTab === 'ACTIVE_BOOKINGS' && (
-        <div className="bg-white rounded-[2rem] border border-slate-100 overflow-hidden divide-y divide-slate-50">
-          {bookedTools.length > 0 ? bookedTools.map((t: Tool) => (
-            <div key={t.id} onClick={() => onViewDetail(t)} className="px-6 py-5 flex items-center justify-between hover:bg-slate-50 transition-colors"><div className="min-w-0 flex-1"><p className="font-black text-neda-navy text-xs uppercase truncate">{t.name}</p><p className="text-[9px] font-bold text-slate-400 uppercase">{t.currentHolderName} @ {t.currentSite}</p></div><ChevronRight size={16} className="text-slate-200" /></div>
-          )) : <div className="px-6 py-12 text-center text-slate-300 uppercase text-[10px]">Empty</div>}
+        <div className="space-y-4">
+          <div className="flex justify-between items-center px-4">
+             <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{bookedTools.length} Live Deployments</span>
+             <button onClick={onDownloadCSV} className="flex items-center gap-2 px-3 py-2 bg-slate-100 text-neda-navy rounded-xl font-black text-[8px] uppercase tracking-widest hover:bg-neda-navy hover:text-white transition-all"><Download size={12} /> Export CSV</button>
+          </div>
+          <div className="bg-white rounded-[2rem] border border-slate-100 overflow-hidden divide-y divide-slate-50 shadow-sm">
+            {bookedTools.length > 0 ? bookedTools.map((t: Tool) => (
+              <div key={t.id} onClick={() => onViewDetail(t)} className="px-6 py-5 flex items-center justify-between hover:bg-slate-50 transition-colors"><div className="min-w-0 flex-1"><p className="font-black text-neda-navy text-xs uppercase truncate">{t.name}</p><p className="text-[9px] font-bold text-slate-400 uppercase">{t.currentHolderName} @ {t.currentSite}</p></div><ChevronRight size={16} className="text-slate-200" /></div>
+            )) : <div className="px-6 py-12 text-center text-slate-300 uppercase text-[10px]">No active bookings</div>}
+          </div>
         </div>
       )}
       {activeTab === 'STOCKTAKE' && (
         <div className="space-y-4">
-          <button onClick={onShowAddTool} className="w-full p-6 bg-slate-50 border border-dashed border-slate-200 rounded-[2rem] flex items-center justify-between"><div className="flex items-center gap-4"><div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center"><Package size={20} /></div><h4 className="font-black text-neda-navy text-[10px] uppercase">New Asset</h4></div><Plus size={20} className="text-neda-orange" /></button>
+          <div className="grid grid-cols-2 gap-3">
+            <button onClick={onShowAddTool} className="p-6 bg-slate-50 border border-dashed border-slate-200 rounded-[2rem] flex flex-col items-center justify-center gap-3"><PlusCircle size={24} className="text-neda-orange" /><h4 className="font-black text-neda-navy text-[8px] uppercase">New Asset</h4></button>
+            <button onClick={onDownloadCSV} className="p-6 bg-slate-50 border border-dashed border-slate-200 rounded-[2rem] flex flex-col items-center justify-center gap-3"><FileSpreadsheet size={24} className="text-neda-navy opacity-40" /><h4 className="font-black text-neda-navy text-[8px] uppercase">Export List</h4></button>
+          </div>
+          <div className="relative">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+            <input type="text" placeholder="Filter inventory..." className="w-full pl-11 pr-4 py-3 bg-white border border-slate-100 rounded-2xl font-bold text-[10px] outline-none shadow-sm" value={assetSearch} onChange={(e) => setAssetSearch(e.target.value)} />
+          </div>
           <div className="grid gap-3">{filteredAssets.map(tool => (
-            <div key={tool.id} onClick={() => onViewDetail(tool)} className="bg-white p-5 rounded-[2rem] border border-slate-100 flex items-center justify-between shadow-sm cursor-pointer"><div className="flex-1"><h4 className="font-black text-neda-navy text-sm uppercase truncate">{tool.name}</h4><p className="text-[9px] font-bold text-slate-400 uppercase">{tool.status}</p></div><ChevronRight size={18} className="text-slate-200" /></div>
+            <div key={tool.id} onClick={() => onViewDetail(tool)} className="bg-white p-5 rounded-[2rem] border border-slate-100 flex items-center justify-between shadow-sm cursor-pointer hover:bg-slate-50 transition-all"><div className="flex-1 min-w-0"><h4 className="font-black text-neda-navy text-sm uppercase truncate">{tool.name}</h4><div className="flex items-center gap-2 mt-1"><span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-sm ${tool.status === ToolStatus.AVAILABLE ? 'bg-green-50 text-green-600' : 'bg-orange-50 text-orange-600'}`}>{tool.status.replace('_', ' ')}</span><span className="text-[8px] font-bold text-slate-300 uppercase">SN: {tool.serialNumber || 'N/A'}</span></div></div><ChevronRight size={18} className="text-slate-200" /></div>
           ))}</div>
         </div>
       )}
@@ -1023,6 +1065,7 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
           </div>
           {unhealthyToolsCount > 0 && (
             <div className="space-y-2">
+              <h4 className="text-[10px] font-black text-red-500 uppercase tracking-widest px-4">Anomalies Detected ({unhealthyToolsCount})</h4>
               {tools.filter(t => (t.currentHolderName && !t.currentHolderId) || (t.currentHolderId && !t.currentHolderName)).map(t => (
                 <div key={t.id} onClick={() => onViewDetail(t)} className="bg-red-50 p-4 rounded-xl border border-red-100 flex justify-between items-center cursor-pointer">
                   <span className="text-[10px] font-black text-neda-navy uppercase">{t.name}</span>
