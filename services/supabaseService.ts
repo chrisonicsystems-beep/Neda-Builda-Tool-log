@@ -31,11 +31,11 @@ const mapUserToDb = (user: User) => cleanPayload({
 });
 
 const mapDbToUser = (dbUser: any): User => ({
-  id: dbUser.id,
-  name: dbUser.name,
-  role: dbUser.role,
-  email: dbUser.email,
-  password: dbUser.password,
+  id: String(dbUser.id), // Ensure ID is always treated as a string in the app
+  name: dbUser.name || 'Unknown User',
+  role: dbUser.role || 'USER',
+  email: dbUser.email || '',
+  password: dbUser.password || 'password123',
   isEnabled: dbUser.is_enabled !== undefined ? dbUser.is_enabled : (dbUser.isEnabled !== undefined ? dbUser.isEnabled : true),
   mustChangePassword: dbUser.must_change_password || dbUser.mustChangePassword || false
 });
@@ -60,20 +60,20 @@ const mapToolToDb = (tool: Tool) => {
 };
 
 const mapDbToTool = (dbTool: any): Tool => ({
-  id: dbTool.id,
+  id: String(dbTool.id),
   name: dbTool.equipment_tool || dbTool.tool_name || dbTool.name || 'Unnamed Asset',
   category: dbTool.equipment_type || dbTool.category || 'General',
   serialNumber: dbTool.serial_number || dbTool.serialNumber || '', 
   status: (dbTool.status as ToolStatus) || ToolStatus.AVAILABLE,
-  currentHolderId: dbTool.current_holder_id || dbTool.currentHolderId,
-  currentHolderName: dbTool.current_holder_name || dbTool.currentHolderName,
-  currentSite: dbTool.current_site || dbTool.currentSite,
-  bookedAt: dbTool.booked_at || dbTool.bookedAt,
-  lastReturnedAt: dbTool.last_returned_at || dbTool.lastReturnedAt,
-  mainPhoto: dbTool.main_photo || dbTool.mainPhoto,
+  currentHolderId: dbTool.current_holder_id ? String(dbTool.current_holder_id) : undefined,
+  currentHolderName: dbTool.current_holder_name || undefined,
+  currentSite: dbTool.current_site || undefined,
+  bookedAt: dbTool.booked_at || undefined,
+  lastReturnedAt: dbTool.last_returned_at || undefined,
+  mainPhoto: dbTool.main_photo || undefined,
   notes: dbTool.notes || '',
-  dateOfPurchase: dbTool.date_of_purchase || dbTool.dateOfPurchase,
-  numberOfItems: dbTool.number_of_items || dbTool.numberOfItems,
+  dateOfPurchase: dbTool.date_of_purchase || undefined,
+  numberOfItems: dbTool.number_of_items || 1,
   logs: dbTool.logs || []
 });
 
@@ -86,32 +86,13 @@ export const upsertSingleTool = async (tool: Tool) => {
 export const upsertSingleUser = async (user: User) => {
   if (!supabase) return;
   
-  // Strategy: Try full mapping (including metadata) first.
-  // This ensures isEnabled and mustChangePassword are saved if columns exist.
   const fullData = mapUserToDb(user);
-  
-  const { error: fullError } = await supabase
+  const { error } = await supabase
     .from('users')
     .upsert(fullData, { onConflict: 'id' });
   
-  if (fullError) {
-    console.warn("Full user upsert failed, attempting core fallback:", fullError.message);
-    // Fallback: Try only mandatory fields in case table schema is strict or missing columns
-    const coreData = cleanPayload({
-      id: user.id,
-      name: user.name,
-      role: user.role,
-      email: user.email,
-      password: user.password
-    });
-    
-    const { error: coreError } = await supabase
-      .from('users')
-      .upsert(coreData, { onConflict: 'id' });
-    
-    if (coreError) {
-      throw new Error(`Critical User Sync Error: ${coreError.message}`);
-    }
+  if (error) {
+    throw new Error(`Sync Error: ${error.message}`);
   }
 };
 
@@ -121,6 +102,26 @@ export const deleteSingleUser = async (userId: string) => {
   if (error) throw error;
 };
 
+export const fetchTools = async (): Promise<Tool[] | null> => {
+  if (!supabase) return null;
+  const { data, error } = await supabase.from('tools').select('*');
+  if (error) {
+    console.error("Supabase Fetch Tools Error:", error);
+    return null;
+  }
+  return data.map(mapDbToTool);
+};
+
+export const fetchUsers = async (): Promise<User[] | null> => {
+  if (!supabase) return null;
+  const { data, error } = await supabase.from('users').select('*');
+  if (error) {
+    console.error("Supabase Fetch Users Error:", error);
+    return null;
+  }
+  return data.map(dbUser => mapDbToUser(dbUser));
+};
+
 export const syncTools = async (tools: Tool[]) => {
   if (!supabase || tools.length === 0) return;
   const dbTools = tools.map(mapToolToDb);
@@ -128,24 +129,9 @@ export const syncTools = async (tools: Tool[]) => {
   if (error) throw error;
 };
 
-export const fetchTools = async (): Promise<Tool[] | null> => {
-  if (!supabase) return null;
-  const { data, error } = await supabase.from('tools').select('*');
-  if (error) return null;
-  return data.map(mapDbToTool);
-};
-
 export const syncUsers = async (users: User[]) => {
   if (!supabase || users.length === 0) return;
-  // Batch sync users
   for (const user of users) {
     await upsertSingleUser(user).catch(err => console.error("Batch User Sync Error:", err));
   }
-};
-
-export const fetchUsers = async (): Promise<User[] | null> => {
-  if (!supabase) return null;
-  const { data, error } = await supabase.from('users').select('*');
-  if (error) return null;
-  return data.map(dbUser => mapDbToUser(dbUser));
 };
