@@ -63,6 +63,7 @@ import { analyzeTools, searchAddresses } from './services/geminiService';
 import { fetchTools, fetchUsers, syncTools, syncUsers, upsertSingleTool, upsertSingleUser, deleteSingleUser, supabase } from './services/supabaseService';
 
 const TEMP_PASSWORD_PREFIX = "NEDA-RESET-";
+const BIOMETRIC_KEY = "neda_biometric_link";
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -79,6 +80,7 @@ const App: React.FC = () => {
   const [showFilters, setShowFilters] = useState(false);
   
   const [isBiometricSupported, setIsBiometricSupported] = useState(false);
+  const [hasLinkedBiometrics, setHasLinkedBiometrics] = useState(false);
 
   // Modal states
   const [showAddUser, setShowAddUser] = useState(false);
@@ -154,14 +156,88 @@ const App: React.FC = () => {
         }
       }
       
+      // Check Biometric Support
       if (window.PublicKeyCredential) {
         const available = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
         setIsBiometricSupported(available);
+        setHasLinkedBiometrics(!!localStorage.getItem(BIOMETRIC_KEY));
       }
       setIsInitializing(false);
     };
     init();
   }, []);
+
+  const handleLinkBiometrics = async () => {
+    if (!currentUser || !isBiometricSupported) return;
+
+    try {
+      const challenge = new Uint8Array(32);
+      window.crypto.getRandomValues(challenge);
+
+      const createCredentialOptions: any = {
+        publicKey: {
+          challenge,
+          rp: { name: "Neda Tool Log" },
+          user: {
+            id: Uint8Array.from(currentUser.id, c => c.charCodeAt(0)),
+            name: currentUser.email,
+            displayName: currentUser.name,
+          },
+          pubKeyCredParams: [{ alg: -7, type: "public-key" }, { alg: -257, type: "public-key" }],
+          authenticatorSelection: { authenticatorAttachment: "platform" },
+          timeout: 60000,
+          attestation: "direct"
+        }
+      };
+
+      await navigator.credentials.create(createCredentialOptions);
+      
+      // Store link reference
+      localStorage.setItem(BIOMETRIC_KEY, JSON.stringify({
+        userId: currentUser.id,
+        email: currentUser.email,
+        timestamp: Date.now()
+      }));
+      setHasLinkedBiometrics(true);
+      setSyncSuccess("Biometrics linked successfully.");
+      setTimeout(() => setSyncSuccess(null), 3000);
+    } catch (err) {
+      console.error("Biometric Linking Failed:", err);
+      setSyncError("Linking failed. Ensure your device has biometrics enabled.");
+    }
+  };
+
+  const handleBiometricLogin = async () => {
+    const linkedData = localStorage.getItem(BIOMETRIC_KEY);
+    if (!linkedData) return;
+
+    try {
+      const { email } = JSON.parse(linkedData);
+      const challenge = new Uint8Array(32);
+      window.crypto.getRandomValues(challenge);
+
+      const getCredentialOptions: any = {
+        publicKey: {
+          challenge,
+          timeout: 60000,
+          userVerification: "required",
+        }
+      };
+
+      await navigator.credentials.get(getCredentialOptions);
+      
+      // Verification successful, find user and log in
+      const user = allUsers.find(u => u.email.toLowerCase() === email.toLowerCase());
+      if (user) {
+        handleLogin(user, true);
+      } else {
+        throw new Error("Linked user no longer exists.");
+      }
+    } catch (err) {
+      console.error("Biometric Login Failed:", err);
+      setSyncError("Biometric authentication failed.");
+    }
+  };
 
   const handleRepairData = async () => {
     setIsSyncing(true);
@@ -403,7 +479,14 @@ const App: React.FC = () => {
   }
 
   if (!currentUser) return (
-    <LoginScreen onLogin={handleLogin} onForgotPassword={handleForgotPassword} users={allUsers} isBiometricSupported={isBiometricSupported} />
+    <LoginScreen 
+      onLogin={handleLogin} 
+      onForgotPassword={handleForgotPassword} 
+      onBiometricLogin={handleBiometricLogin}
+      users={allUsers} 
+      isBiometricSupported={isBiometricSupported} 
+      hasLinkedBiometrics={hasLinkedBiometrics}
+    />
   );
 
   return (
@@ -487,6 +570,9 @@ const App: React.FC = () => {
           currentUser={currentUser} 
           onInitiateReturn={(t: Tool) => setReturningTool(t)}
           onViewDetail={(t: Tool) => setSelectedToolForDetail(t)}
+          isBiometricSupported={isBiometricSupported}
+          hasLinkedBiometrics={hasLinkedBiometrics}
+          onLinkBiometrics={handleLinkBiometrics}
         />
       )}
     </Layout>
@@ -859,7 +945,7 @@ const MandatoryPasswordChange: React.FC<{ user: User; onUpdate: (u: User) => voi
   );
 };
 
-const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, users, isBiometricSupported }) => {
+const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, onBiometricLogin, users, isBiometricSupported, hasLinkedBiometrics }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
@@ -868,24 +954,41 @@ const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, users, isBiomet
   const [forgotEmail, setForgotEmail] = useState('');
   const [tempPassResult, setTempPassResult] = useState<string | null>(null);
   const [isResetting, setIsResetting] = useState(false);
+  
   const handleSignIn = (e: React.FormEvent) => {
     e.preventDefault();
     const user = users.find((u: User) => u.email.toLowerCase() === email.trim().toLowerCase());
     if (user && user.password === password) { onLogin(user, rememberMe); } else { setError('Invalid Credentials.'); }
   };
+
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-center p-6 text-center">
       <div className="w-full max-w-[420px] bg-white rounded-[3.5rem] p-10 pt-12 pb-14 shadow-2xl flex flex-col items-center">
         <img src={LOGO_URL} alt="Neda Builda" className="h-20 mb-10 object-contain" />
         <form onSubmit={handleSignIn} className="w-full space-y-4">
-          <input type="email" placeholder="Email Address" required className="w-full bg-[#f8faff] border border-slate-100 rounded-2xl py-5 px-6 text-slate-700 font-bold text-center outline-none" value={email} onChange={(e) => setEmail(e.target.value)} />
-          <input type="password" placeholder="Password" required className="w-full bg-[#f8faff] border border-slate-100 rounded-2xl py-5 px-6 text-slate-700 font-bold text-center outline-none" value={password} onChange={(e) => setPassword(e.target.value)} />
+          <input type="email" placeholder="Email Address" required className="w-full bg-[#f8faff] border border-slate-100 rounded-2xl py-5 px-6 text-slate-700 font-bold text-center outline-none shadow-sm focus:ring-2 focus:ring-neda-navy/5" value={email} onChange={(e) => setEmail(e.target.value)} />
+          <input type="password" placeholder="Password" required className="w-full bg-[#f8faff] border border-slate-100 rounded-2xl py-5 px-6 text-slate-700 font-bold text-center outline-none shadow-sm focus:ring-2 focus:ring-neda-navy/5" value={password} onChange={(e) => setPassword(e.target.value)} />
           {error && <p className="text-red-500 text-[10px] font-black uppercase tracking-widest">{error}</p>}
+          
           <div className="flex justify-between items-center px-2 mb-4">
-            <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={rememberMe} onChange={e => setRememberMe(e.target.checked)} className="w-4 h-4 rounded text-neda-navy" /><span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Remember me</span></label>
+            <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={rememberMe} onChange={e => setRememberMe(e.target.checked)} className="w-4 h-4 rounded text-neda-navy border-slate-200" /><span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Remember me</span></label>
             <button type="button" onClick={() => { setShowForgotModal(true); setTempPassResult(null); setError(''); }} className="text-neda-orange text-[10px] font-black uppercase tracking-widest">Forgot Key?</button>
           </div>
-          <button type="submit" className="w-full bg-neda-navy text-white py-6 rounded-2xl font-black text-xl uppercase shadow-xl active:scale-95 transition-all">Sign In</button>
+          
+          <div className="flex flex-col gap-3">
+            <button type="submit" className="w-full bg-neda-navy text-white py-6 rounded-2xl font-black text-xl uppercase shadow-xl active:scale-95 transition-all">Sign In</button>
+            
+            {isBiometricSupported && hasLinkedBiometrics && (
+              <button 
+                type="button" 
+                onClick={onBiometricLogin}
+                className="w-full flex items-center justify-center gap-3 py-5 bg-white border-2 border-neda-navy/10 rounded-2xl text-neda-navy font-black uppercase text-xs tracking-widest hover:bg-slate-50 active:scale-95 transition-all"
+              >
+                <Fingerprint size={20} className="text-neda-orange" />
+                Biometric Sign In
+              </button>
+            )}
+          </div>
         </form>
       </div>
       {showForgotModal && (
@@ -897,7 +1000,7 @@ const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, users, isBiomet
             ) : (
               <div><h2 className="text-xl font-black text-neda-navy uppercase mb-2">Reset Request</h2><p className="text-[10px] font-bold text-slate-400 uppercase mb-8 tracking-widest">Enter work email</p>
                 <form onSubmit={async (e) => { e.preventDefault(); setIsResetting(true); try { const t = await onForgotPassword(forgotEmail); setTempPassResult(t); } catch(err:any) { setError(err.message); } finally { setIsResetting(false); } }} className="space-y-4">
-                  <input type="email" placeholder="Email" required className="w-full p-5 bg-slate-50 rounded-2xl font-bold text-center outline-none" value={forgotEmail} onChange={e => setForgotEmail(e.target.value)} />
+                  <input type="email" placeholder="Email" required className="w-full p-5 bg-slate-50 rounded-2xl font-bold text-center outline-none shadow-inner" value={forgotEmail} onChange={e => setForgotEmail(e.target.value)} />
                   {error && <p className="text-red-500 text-[9px] font-black uppercase">{error}</p>}
                   <button type="submit" disabled={isResetting} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase shadow-lg disabled:opacity-50">{isResetting ? <Loader2 className="animate-spin mx-auto" /> : "Verify Staff"}</button>
                   <button type="button" onClick={() => setShowForgotModal(false)} className="w-full py-3 text-slate-400 text-[10px] font-black uppercase">Cancel</button>
@@ -1107,13 +1210,39 @@ const AIAssistant: React.FC<any> = ({ tools }) => {
   );
 };
 
-const MyToolsView: React.FC<any> = ({ tools, currentUser, onInitiateReturn, onViewDetail }) => (
+const MyToolsView: React.FC<any> = ({ tools, currentUser, onInitiateReturn, onViewDetail, isBiometricSupported, hasLinkedBiometrics, onLinkBiometrics }) => (
   <div className="space-y-6">
     <div className="bg-neda-navy p-10 rounded-[3rem] text-white shadow-2xl relative overflow-hidden">
        <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-16 -mt-16"></div>
        <h2 className="text-4xl font-black uppercase tracking-tight">Toolkit</h2>
        <p className="text-[11px] font-black text-neda-orange uppercase mt-2 tracking-[0.3em]">{currentUser.name}</p>
     </div>
+
+    {isBiometricSupported && (
+      <div className="px-2">
+        <button 
+          onClick={onLinkBiometrics}
+          disabled={hasLinkedBiometrics}
+          className={`w-full p-6 rounded-[2rem] border flex items-center justify-between transition-all active:scale-95 ${
+            hasLinkedBiometrics 
+            ? 'bg-green-50 border-green-100 text-green-700 opacity-60' 
+            : 'bg-white border-neda-navy/10 text-neda-navy hover:bg-slate-50'
+          }`}
+        >
+          <div className="flex items-center gap-4">
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${hasLinkedBiometrics ? 'bg-green-100' : 'bg-neda-lightOrange'}`}>
+              <Fingerprint size={20} className={hasLinkedBiometrics ? 'text-green-600' : 'text-neda-orange'} />
+            </div>
+            <div className="text-left">
+              <h4 className="font-black uppercase text-[10px]">{hasLinkedBiometrics ? 'FaceID Linked' : 'Enable FaceID'}</h4>
+              <p className="text-[7px] font-bold text-slate-400 uppercase tracking-widest">{hasLinkedBiometrics ? 'Hardware key active' : 'Secure device unlock'}</p>
+            </div>
+          </div>
+          {hasLinkedBiometrics ? <CheckCircle size={18} className="text-green-500" /> : <ChevronRight size={18} className="text-slate-300" />}
+        </button>
+      </div>
+    )}
+
     <div className="grid gap-3">
       {tools.length === 0 ? (
         <div className="text-center py-16 bg-white rounded-[2rem] border border-dashed border-slate-200">
