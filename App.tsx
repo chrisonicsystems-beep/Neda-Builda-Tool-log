@@ -721,38 +721,77 @@ const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, status
 
   return (
     <div className="space-y-6">
+      {/* Search and Filters */}
       <div className="relative">
         <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-        <input type="text" placeholder="Search equipment..." className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-xs outline-none" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
-        <button onClick={() => setShowFilters(!showFilters)} className={`absolute right-3 top-1/2 -translate-y-1/2 p-2 rounded-xl transition-colors ${showFilters ? 'bg-neda-navy text-white' : 'text-slate-400'}`}><Filter size={18} /></button>
+        <input 
+          type="text" 
+          placeholder="Search equipment..." 
+          className="w-full pl-12 pr-4 py-4 bg-white border border-slate-100 rounded-2xl font-bold text-xs outline-none shadow-sm focus:ring-2 focus:ring-neda-navy/5 transition-all" 
+          value={searchTerm} 
+          onChange={(e) => setSearchTerm(e.target.value)} 
+        />
+        <button 
+          onClick={() => setShowFilters(!showFilters)} 
+          className={`absolute right-3 top-1/2 -translate-y-1/2 p-2 rounded-xl transition-colors ${showFilters ? 'bg-neda-navy text-white' : 'text-slate-400 hover:bg-slate-50'}`}
+        >
+          <Filter size={18} />
+        </button>
       </div>
-      <div className="grid gap-4">
-        {tools.map((tool: Tool) => (
-          <div key={tool.id} className="bg-white border border-slate-100 rounded-[2rem] p-6 shadow-sm">
-            <div className="flex justify-between items-start mb-4">
-              <div>
-                <span className="text-[8px] font-black uppercase tracking-[0.2em] text-neda-orange mb-1 block">{tool.category}</span>
-                <h3 className="font-extrabold text-neda-navy text-lg tracking-tight">{tool.name}</h3>
+
+      {/* Main List */}
+      <div className="bg-white rounded-[2rem] border border-slate-100 overflow-hidden shadow-sm divide-y divide-slate-50">
+        {tools.length > 0 ? (
+          tools.map((tool: Tool) => (
+            <div key={tool.id} className="px-6 py-5 flex items-center justify-between hover:bg-slate-50 transition-colors">
+              <div className="flex-1 min-w-0 pr-4">
+                <div className="flex items-center gap-2 mb-1">
+                   <span className="text-[7px] font-black uppercase tracking-widest text-neda-orange bg-neda-lightOrange px-1.5 py-0.5 rounded-sm">
+                     {tool.category}
+                   </span>
+                   <div className={`w-1.5 h-1.5 rounded-full ${tool.status === ToolStatus.AVAILABLE ? 'bg-green-500' : 'bg-orange-500 animate-pulse'}`}></div>
+                </div>
+                
+                <h3 className="font-black text-neda-navy text-sm uppercase tracking-tight truncate">
+                  {tool.name}
+                </h3>
+                
+                <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5">
+                   <div className="flex items-center gap-1.5">
+                      <UserIcon size={10} className="text-slate-300" />
+                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider truncate max-w-[90px]">
+                        {tool.currentHolderName || 'Warehouse'}
+                      </span>
+                   </div>
+                   <div className="flex items-center gap-1.5">
+                      <MapPin size={10} className="text-slate-300" />
+                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider truncate max-w-[110px]">
+                        {tool.currentSite || 'Warehouse'}
+                      </span>
+                   </div>
+                </div>
               </div>
-              <div className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-wider ${tool.status === ToolStatus.AVAILABLE ? 'bg-green-50 text-green-600' : 'bg-orange-50 text-orange-600'}`}>{tool.status.replace('_', ' ')}</div>
-            </div>
-            <div className="flex items-center justify-between pt-5 border-t border-slate-50">
-               <div className="flex gap-5">
-                  <div className="flex flex-col">
-                    <span className="text-[8px] font-bold text-slate-300 uppercase tracking-widest mb-0.5">Holder</span>
-                    <span className="text-[10px] font-black text-slate-600 uppercase truncate max-w-[80px]">{tool.currentHolderName || 'Warehouse'}</span>
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-[8px] font-bold text-slate-300 uppercase tracking-widest mb-0.5">Location</span>
-                    <span className="text-[10px] font-black text-slate-600 uppercase truncate max-w-[80px]">{tool.currentSite || 'Warehouse'}</span>
-                  </div>
-               </div>
-               {(tool.status === ToolStatus.AVAILABLE || (tool.status === ToolStatus.BOOKED_OUT && tool.currentHolderId === currentUser.id)) && (
-                <button onClick={() => handleAction(tool)} className="px-6 py-3 bg-neda-navy text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-neda-navy/10 active:scale-95 transition-all">{tool.status === ToolStatus.AVAILABLE ? 'Book Out' : 'Return'}</button>
+
+              {(tool.status === ToolStatus.AVAILABLE || (tool.status === ToolStatus.BOOKED_OUT && tool.currentHolderId === currentUser.id)) && (
+                <button 
+                  onClick={() => handleAction(tool)} 
+                  className={`shrink-0 px-4 py-2.5 rounded-xl font-black text-[9px] uppercase tracking-widest transition-all active:scale-95 shadow-md ${
+                    tool.status === ToolStatus.AVAILABLE 
+                      ? 'bg-neda-navy text-white shadow-neda-navy/10' 
+                      : 'bg-white border border-neda-orange text-neda-orange shadow-neda-orange/5'
+                  }`}
+                >
+                  {tool.status === ToolStatus.AVAILABLE ? 'Book Out' : 'Return'}
+                </button>
               )}
             </div>
+          ))
+        ) : (
+          <div className="px-6 py-12 text-center">
+            <Package size={40} className="mx-auto text-slate-100 mb-3" />
+            <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">No equipment matches</p>
           </div>
-        ))}
+        )}
       </div>
     </div>
   );
