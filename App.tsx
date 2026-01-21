@@ -874,7 +874,13 @@ const AddToolModal: React.FC<{ onClose: () => void; onSave: (t: Tool) => void }>
         <div className="flex justify-between items-center mb-6"><h2 className="text-xl font-black text-neda-navy uppercase">Add Equipment</h2><button onClick={onClose} className="p-2 text-slate-300 hover:text-neda-navy"><X size={20} /></button></div>
         <form onSubmit={e => { e.preventDefault(); onSave({ id: 'T' + Date.now(), ...formData, status: ToolStatus.AVAILABLE, logs: [] }); }} className="space-y-4">
           <input required className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm" placeholder="Tool Name" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
-          <select className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm" value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})}><option value="Power Tools">Power Tools</option><option value="Precision">Precision</option><option value="Power">Power</option><option value="Hand Tools">Hand Tools</option></select>
+          <select className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm" value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})}>
+            <option value="Power Tools">Power Tools</option>
+            <option value="Precision">Precision</option>
+            <option value="Power">Power</option>
+            <option value="Hand Tools">Hand Tools</option>
+            <option value="Asset/Office">Asset/Office</option>
+          </select>
           <input className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm" placeholder="Serial Number" value={formData.serialNumber} onChange={e => setFormData({...formData, serialNumber: e.target.value})} />
           <input type="date" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm" value={formData.dateOfPurchase} onChange={e => setFormData({...formData, dateOfPurchase: e.target.value})} />
           <button type="submit" className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg">Register Asset</button>
@@ -963,7 +969,7 @@ const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, onBiometricLogi
       </div>
       {showForgotModal && (
         <div className="fixed inset-0 z-[600] bg-neda-navy/95 backdrop-blur-md flex items-center justify-center p-6 animate-in fade-in">
-          <div className="bg-white w-full max-w-sm rounded-[3rem] p-10 shadow-2xl text-center">
+          <div className="bg-white w-full max-sm rounded-[3rem] p-10 shadow-2xl text-center">
             {tempPassResult ? (
               <div className="animate-in zoom-in-95">
                 <div className="bg-green-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6"><Key size={32} className="text-green-600" /></div>
