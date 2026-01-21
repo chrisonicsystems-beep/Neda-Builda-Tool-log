@@ -8,62 +8,38 @@ import {
   MapPin, 
   X, 
   Loader2, 
-  Package, 
-  Sparkles, 
-  Filter, 
-  Plus, 
-  ChevronDown,
-  Edit,
-  Trash2,
-  Download,
-  Upload,
-  FileText,
   User as UserIcon,
   Fingerprint,
-  WifiOff,
   AlertTriangle,
   CheckCircle2,
-  Lock,
   UserPlus,
-  ArrowUpRight,
   Send,
-  AlertCircle,
-  Scan,
   CheckCircle,
   FileSpreadsheet,
   History,
   ShieldAlert,
-  Save,
   Mail,
-  Info,
   Key,
   Eye,
   EyeOff,
-  Copy,
   PlusCircle,
-  Wrench,
   Camera,
-  MessageSquare,
-  ClipboardCheck,
   Stethoscope,
-  Navigation,
-  RefreshCcw,
   Clock,
-  Warehouse,
-  ShieldCheck,
-  Database,
-  Activity,
   Zap,
   ChevronRight,
-  ListFilter,
-  CalendarDays,
   ChevronUp,
+  ChevronDown,
   ArrowUpAz,
   ArrowDownAz,
-  Shield
+  Shield,
+  Edit,
+  Trash2,
+  Download,
+  Sparkles
 } from 'lucide-react';
-import { analyzeTools, searchAddresses } from './services/geminiService';
-import { fetchTools, fetchUsers, syncTools, syncUsers, upsertSingleTool, upsertSingleUser, deleteSingleUser, supabase } from './services/supabaseService';
+import { analyzeTools } from './services/geminiService';
+import { fetchTools, fetchUsers, upsertSingleTool, upsertSingleUser, deleteSingleUser } from './services/supabaseService';
 
 const TEMP_PASSWORD_PREFIX = "NEDA-RESET-";
 const BIOMETRIC_KEY = "neda_biometric_link";
@@ -101,7 +77,6 @@ const App: React.FC = () => {
       let finalUsers = remoteUsers && remoteUsers.length > 0 ? remoteUsers : INITIAL_USERS;
       let finalTools = remoteTools && remoteTools.length > 0 ? remoteTools : INITIAL_TOOLS;
 
-      // --- RELATIONAL HEALING ---
       finalTools = finalTools.map(tool => {
         if (tool.currentHolderId) {
           const matchedUser = finalUsers.find(u => String(u.id).trim().toLowerCase() === String(tool.currentHolderId).trim().toLowerCase());
@@ -176,7 +151,6 @@ const App: React.FC = () => {
           challenge,
           rp: { name: "Neda Tool Log" },
           user: {
-            // Fix: Use TextEncoder to safely convert the user ID string into a Uint8Array for WebAuthn
             id: new TextEncoder().encode(currentUser.id),
             name: currentUser.email,
             displayName: currentUser.name,
@@ -258,10 +232,7 @@ const App: React.FC = () => {
 
   const handleLogin = async (user: User, remember: boolean) => {
     setIsSyncing(true);
-    // Refresh data immediately on login to ensure user sees latest state
     const result = await loadData();
-    
-    // Check if the user object we have is still valid or has changed in the fresh load
     let finalUser = user;
     if (result) {
       const freshUser = result.finalUsers.find(u => u.email.toLowerCase() === user.email.toLowerCase());
@@ -753,7 +724,7 @@ const ToolDetailModal: React.FC<{ tool: Tool; onClose: () => void; onAddLog: (to
                   <div className="animate-in slide-in-from-top-4 duration-300">
                     <div className="flex justify-between items-center mb-6 pl-2">
                       <span className="text-[8px] font-black text-slate-400 uppercase tracking-[0.2em]">Full Timeline</span>
-                      <button onClick={() => setShowAddLog(true)} className="flex items-center gap-2 px-3 py-1.5 bg-neda-navy/5 text-neda-navy rounded-lg font-black text-[8px] uppercase tracking-widest hover:bg-neda-navy hover:text-white transition-all"><Plus size={10} /> Add Entry</button>
+                      <button onClick={() => setShowAddLog(true)} className="flex items-center gap-2 px-3 py-1.5 bg-neda-navy/5 text-neda-navy rounded-lg font-black text-[8px] uppercase tracking-widest hover:bg-neda-navy hover:text-white transition-all"><PlusCircle size={10} className="w-2.5 h-2.5" /> Add Entry</button>
                     </div>
                     <div className="relative border-l-2 border-slate-100 ml-3 pl-8 space-y-10 py-2">
                       {history.length > 0 ? history.map((log) => (
@@ -992,7 +963,7 @@ const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, onBiometricLogi
       </div>
       {showForgotModal && (
         <div className="fixed inset-0 z-[600] bg-neda-navy/95 backdrop-blur-md flex items-center justify-center p-6 animate-in fade-in">
-          <div className="bg-white w-full max-sm rounded-[3rem] p-10 shadow-2xl text-center">
+          <div className="bg-white w-full max-w-sm rounded-[3rem] p-10 shadow-2xl text-center">
             {tempPassResult ? (
               <div className="animate-in zoom-in-95">
                 <div className="bg-green-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6"><Key size={32} className="text-green-600" /></div>
@@ -1040,7 +1011,7 @@ const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, status
           onClick={() => setShowFilters(!showFilters)} 
           className={`p-2 rounded-xl transition-colors ${showFilters ? 'bg-neda-navy text-white' : 'text-slate-400 hover:bg-slate-50'}`}
         >
-          <Filter size={18} />
+          <Sparkles size={18} className={showFilters ? 'text-chrisonic-cyan' : ''} />
         </button>
       </div>
     </div>
@@ -1224,7 +1195,7 @@ const AIAssistant: React.FC<any> = ({ tools }) => {
         <input placeholder="Ask about equipment..." className="w-full p-5 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-xs outline-none" value={query} onChange={e => setQuery(e.target.value)} onKeyPress={e => e.key === 'Enter' && handleAsk()} />
         <button onClick={handleAsk} className="absolute right-2 top-2 p-3 bg-neda-navy text-white rounded-xl shadow-lg">{loading ? <Loader2 className="animate-spin" size={18} /> : <Send size={18} />}</button>
       </div>
-      {reply && <div className="p-6 bg-slate-50 rounded-2xl text-[12px] font-bold text-slate-700 leading-relaxed animate-in fade-in">{reply}</div>}
+      {reply && <div className="p-6 bg-slate-50 rounded-2xl text-[12px] font-bold text-slate-700 leading-relaxed animate-in fade-in whitespace-pre-wrap">{reply}</div>}
     </div>
   );
 };
