@@ -356,23 +356,28 @@ const App: React.FC = () => {
     await updateTool(updatedTool);
   };
 
-  const handleConfirmBookOut = async (tool: Tool, siteAddress: string) => {
+  const handleConfirmBookOut = async (tool: Tool, siteAddress: string, targetUserId?: string) => {
     if (!currentUser) return;
     
+    // Determine who is getting the tool
+    const targetId = targetUserId || currentUser.id;
+    const targetUser = allUsers.find(u => u.id === targetId) || currentUser;
+
     const newLog: ToolLog = {
       id: Math.random().toString(36).substr(2, 9),
-      userId: currentUser.id,
-      userName: currentUser.name,
+      userId: targetUser.id,
+      userName: targetUser.name,
       action: 'BOOK_OUT',
       timestamp: Date.now(),
-      site: siteAddress
+      site: siteAddress,
+      comment: targetId !== currentUser.id ? `Assigned to ${targetUser.name} by ${currentUser.name}` : undefined
     };
 
     const updatedTool: Tool = {
       ...tool,
       status: ToolStatus.BOOKED_OUT,
-      currentHolderId: currentUser.id,
-      currentHolderName: currentUser.name,
+      currentHolderId: targetUser.id,
+      currentHolderName: targetUser.name,
       currentSite: siteAddress,
       bookedAt: Date.now(),
       logs: [newLog, ...(tool.logs || [])].slice(0, 50)
@@ -505,7 +510,15 @@ const App: React.FC = () => {
       {showAddUser && <AddUserModal onClose={() => setShowAddUser(false)} onSave={handleAddUser} />}
       {showAddTool && <AddToolModal onClose={() => setShowAddTool(false)} onSave={handleAddTool} />}
       {returningTool && <ReturnToolModal tool={returningTool} onClose={() => setReturningTool(null)} onConfirm={handleReturnTool} />}
-      {bookingTool && <BookOutModal tool={bookingTool} onClose={() => setBookingTool(null)} onConfirm={handleConfirmBookOut} />}
+      {bookingTool && (
+        <BookOutModal 
+          tool={bookingTool} 
+          onClose={() => setBookingTool(null)} 
+          onConfirm={handleConfirmBookOut} 
+          users={allUsers}
+          currentUser={currentUser}
+        />
+      )}
       {selectedToolForDetail && (
         <ToolDetailModal 
           tool={selectedToolForDetail} 
@@ -757,8 +770,11 @@ const ToolDetailModal: React.FC<{ tool: Tool; onClose: () => void; onAddLog: (to
   );
 };
 
-const BookOutModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (tool: Tool, siteAddress: string) => void }> = ({ tool, onClose, onConfirm }) => {
+const BookOutModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (tool: Tool, siteAddress: string, targetUserId?: string) => void; users: User[]; currentUser: User }> = ({ tool, onClose, onConfirm, users, currentUser }) => {
   const [addressInput, setAddressInput] = useState('');
+  const [targetUserId, setTargetUserId] = useState(currentUser.id);
+
+  const canAssignOthers = currentUser.role === UserRole.ADMIN || currentUser.role === UserRole.MANAGER;
 
   return (
     <div className="fixed inset-0 z-[700] bg-neda-navy/95 backdrop-blur-md flex items-center justify-center p-6 animate-in fade-in">
@@ -775,6 +791,27 @@ const BookOutModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (tool
           </button>
         </div>
         <div className="space-y-6">
+          {canAssignOthers && (
+            <div className="space-y-2">
+              <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.1em] pl-1">Assign To Staff</span>
+              <div className="relative">
+                <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
+                <select 
+                  className="w-full p-5 pl-12 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm outline-none focus:ring-4 focus:ring-neda-navy/5 appearance-none"
+                  value={targetUserId}
+                  onChange={(e) => setTargetUserId(e.target.value)}
+                >
+                  {users.map(u => (
+                    <option key={u.id} value={u.id}>
+                      {u.name} {u.id === currentUser.id ? '(You)' : ''}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 pointer-events-none" size={18} />
+              </div>
+            </div>
+          )}
+
           <div className="space-y-2 relative">
             <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.1em] pl-1">Site Address</span>
             <div className="relative z-[710]">
@@ -789,14 +826,13 @@ const BookOutModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (tool
                 autoComplete="off"
               />
             </div>
-            <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest pl-1 mt-2">Manual entry required</p>
           </div>
           <button 
             disabled={addressInput.trim().length < 2} 
-            onClick={() => onConfirm(tool, addressInput.trim())} 
+            onClick={() => onConfirm(tool, addressInput.trim(), targetUserId)} 
             className="w-full py-6 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-xl active:scale-[0.98] transition-all disabled:opacity-40 disabled:grayscale text-sm"
           >
-            Confirm Site Assignment
+            Confirm Deployment
           </button>
         </div>
       </div>
