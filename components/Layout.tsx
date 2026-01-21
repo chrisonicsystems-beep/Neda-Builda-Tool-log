@@ -1,10 +1,12 @@
+
 import React from 'react';
 import { 
   ClipboardList, 
   User, 
   ShieldCheck, 
   Sparkles, 
-  LogOut
+  LogOut,
+  RefreshCcw
 } from 'lucide-react';
 import { View, UserRole } from '../types';
 
@@ -24,10 +26,12 @@ interface LayoutProps {
   setView: (view: View) => void;
   userRole: UserRole;
   onLogout: () => void;
+  onRefresh?: () => void;
+  isSyncing?: boolean;
   children: React.ReactNode;
 }
 
-const Layout: React.FC<LayoutProps> = ({ activeView, setView, userRole, onLogout, children }) => {
+const Layout: React.FC<LayoutProps> = ({ activeView, setView, userRole, onLogout, onRefresh, isSyncing, children }) => {
   const canSeeDashboard = userRole === UserRole.ADMIN || userRole === UserRole.MANAGER;
 
   return (
@@ -43,12 +47,23 @@ const Layout: React.FC<LayoutProps> = ({ activeView, setView, userRole, onLogout
             <span className="text-[6px] font-bold text-slate-400 uppercase tracking-widest leading-tight mt-0.5">Powered by <span className="text-neda-orange font-black">Chrisonic Systems</span></span>
           </div>
         </div>
-        <button 
-          onClick={onLogout}
-          className="p-2 text-slate-400 hover:text-red-500 transition-colors"
-        >
-          <LogOut size={18} />
-        </button>
+        <div className="flex items-center gap-1">
+          {onRefresh && (
+            <button 
+              onClick={onRefresh}
+              className={`p-2 transition-all rounded-xl ${isSyncing ? 'text-neda-orange' : 'text-slate-400 hover:text-neda-navy'}`}
+              disabled={isSyncing}
+            >
+              <RefreshCcw size={18} className={isSyncing ? 'animate-spin' : ''} />
+            </button>
+          )}
+          <button 
+            onClick={onLogout}
+            className="p-2 text-slate-400 hover:text-red-500 transition-colors"
+          >
+            <LogOut size={18} />
+          </button>
+        </div>
       </header>
 
       {/* Main Content */}

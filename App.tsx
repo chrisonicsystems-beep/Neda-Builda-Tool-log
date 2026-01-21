@@ -158,6 +158,14 @@ const App: React.FC = () => {
     init();
   }, []);
 
+  const handleManualRefresh = async () => {
+    setIsSyncing(true);
+    await loadData();
+    setIsSyncing(false);
+    setSyncSuccess("Inventory Refreshed");
+    setTimeout(() => setSyncSuccess(null), 2000);
+  };
+
   const handleLinkBiometrics = async () => {
     if (!currentUser || !isBiometricSupported) return;
     try {
@@ -168,7 +176,8 @@ const App: React.FC = () => {
           challenge,
           rp: { name: "Neda Tool Log" },
           user: {
-            id: Uint8Array.from(currentUser.id, c => c.charCodeAt(0)),
+            // Fix: Use TextEncoder to safely convert the user ID string into a Uint8Array for WebAuthn
+            id: new TextEncoder().encode(currentUser.id),
             name: currentUser.email,
             displayName: currentUser.name,
           },
@@ -204,7 +213,7 @@ const App: React.FC = () => {
           setSyncError("Temporary password detected. Use standard login.");
           return;
         }
-        handleLogin(user, true);
+        await handleLogin(user, true);
       }
     } catch (err) {
       console.error("Biometric Login Failed:", err);
@@ -247,10 +256,24 @@ const App: React.FC = () => {
     }
   };
 
-  const handleLogin = (user: User, remember: boolean) => {
-    if (user.password?.startsWith(TEMP_PASSWORD_PREFIX)) user.mustChangePassword = true;
-    setCurrentUser(user);
-    if (remember) localStorage.setItem('et_user', JSON.stringify(user));
+  const handleLogin = async (user: User, remember: boolean) => {
+    setIsSyncing(true);
+    // Refresh data immediately on login to ensure user sees latest state
+    const result = await loadData();
+    
+    // Check if the user object we have is still valid or has changed in the fresh load
+    let finalUser = user;
+    if (result) {
+      const freshUser = result.finalUsers.find(u => u.email.toLowerCase() === user.email.toLowerCase());
+      if (freshUser) {
+        finalUser = freshUser;
+      }
+    }
+
+    if (finalUser.password?.startsWith(TEMP_PASSWORD_PREFIX)) finalUser.mustChangePassword = true;
+    setCurrentUser(finalUser);
+    if (remember) localStorage.setItem('et_user', JSON.stringify(finalUser));
+    setIsSyncing(false);
   };
 
   const handleLogout = () => {
@@ -477,7 +500,14 @@ const App: React.FC = () => {
   };
 
   return (
-    <Layout activeView={view} setView={setView} userRole={currentUser.role} onLogout={handleLogout}>
+    <Layout 
+      activeView={view} 
+      setView={setView} 
+      userRole={currentUser.role} 
+      onLogout={handleLogout}
+      onRefresh={handleManualRefresh}
+      isSyncing={isSyncing}
+    >
       {currentUser.mustChangePassword && <MandatoryPasswordChange user={currentUser} onUpdate={updateUser} />}
       <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[100] w-full max-w-xs px-4 pointer-events-none">
         {isSyncing && (
@@ -658,7 +688,7 @@ const ToolDetailModal: React.FC<{ tool: Tool; onClose: () => void; onAddLog: (to
 
   return (
     <div className="fixed inset-0 z-[750] bg-neda-navy/95 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-6 animate-in fade-in">
-      <div className="bg-white w-full max-w-lg h-[90vh] sm:h-auto sm:max-h-[85vh] rounded-t-[3rem] sm:rounded-[3rem] shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-10">
+      <div className="bg-white w-full max-lg h-[90vh] sm:h-auto sm:max-h-[85vh] rounded-t-[3rem] sm:rounded-[3rem] shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-10">
         <div className="p-8 border-b border-slate-50 flex justify-between items-start shrink-0">
           <div>
             <div className="flex items-center gap-2 mb-1">
@@ -758,46 +788,6 @@ const ToolDetailModal: React.FC<{ tool: Tool; onClose: () => void; onAddLog: (to
 
 const BookOutModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (tool: Tool, siteAddress: string) => void }> = ({ tool, onClose, onConfirm }) => {
   const [addressInput, setAddressInput] = useState('');
-  const [suggestions, setSuggestions] = useState<string[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
-  const [hasAttemptedSearch, setHasAttemptedSearch] = useState(false);
-  const [userCoords, setUserCoords] = useState<{ latitude: number; longitude: number } | undefined>(undefined);
-  const searchTimeoutRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => setUserCoords({ latitude: position.coords.latitude, longitude: position.coords.longitude }),
-        (error) => console.warn("Geolocation denied.", error)
-      );
-    }
-  }, []);
-
-  const handleAddressChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-    setAddressInput(value);
-    if (searchTimeoutRef.current) window.clearTimeout(searchTimeoutRef.current);
-    if (value.trim().length >= 2) {
-      setIsSearching(true);
-      setHasAttemptedSearch(true);
-      searchTimeoutRef.current = window.setTimeout(async () => {
-        const results = await searchAddresses(value, userCoords);
-        setSuggestions(results);
-        setIsSearching(false);
-      }, 350); 
-    } else {
-      setSuggestions([]);
-      setIsSearching(false);
-      setHasAttemptedSearch(false);
-    }
-  };
-
-  const handleSelectSuggestion = (e: React.PointerEvent<HTMLButtonElement>, addr: string) => {
-    e.preventDefault();
-    setAddressInput(addr);
-    setSuggestions([]);
-    setHasAttemptedSearch(false);
-  };
 
   return (
     <div className="fixed inset-0 z-[700] bg-neda-navy/95 backdrop-blur-md flex items-center justify-center p-6 animate-in fade-in">
@@ -815,56 +805,23 @@ const BookOutModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (tool
         </div>
         <div className="space-y-6">
           <div className="space-y-2 relative">
-            <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.1em] pl-1">Site Address (NZ Only)</span>
+            <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.1em] pl-1">Site Address</span>
             <div className="relative z-[710]">
               <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
               <input 
                 autoFocus 
                 type="text" 
-                placeholder="Start typing street address..." 
+                placeholder="Enter job site address..." 
                 className="w-full p-5 pl-12 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm outline-none focus:ring-4 focus:ring-neda-navy/5 transition-all shadow-sm" 
                 value={addressInput} 
-                onChange={handleAddressChange} 
+                onChange={(e) => setAddressInput(e.target.value)} 
                 autoComplete="off"
               />
-              {isSearching && (
-                <div className="absolute right-4 top-1/2 -translate-y-1/2">
-                  <Loader2 className="animate-spin text-neda-orange" size={16} />
-                </div>
-              )}
             </div>
-            {(suggestions.length > 0 || hasAttemptedSearch) && (
-              <div className="absolute top-full left-0 right-0 mt-3 bg-white rounded-[1.5rem] shadow-2xl border border-slate-100 overflow-hidden z-[720] max-h-[300px] overflow-y-auto hide-scrollbar">
-                {isSearching ? (
-                  <div className="px-5 py-12 text-center flex flex-col items-center gap-4 bg-white">
-                     <div className="bg-slate-50 p-4 rounded-full"><MapPin size={24} className="text-slate-200 animate-pulse" /></div>
-                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Searching maps...</span>
-                  </div>
-                ) : suggestions.length > 0 ? (
-                  suggestions.map((addr, idx) => (
-                    <button 
-                      key={idx} 
-                      onPointerDown={(e) => handleSelectSuggestion(e, addr)} 
-                      className="w-full text-left px-6 py-5 text-[11px] font-bold text-slate-600 hover:bg-slate-50 flex items-center gap-4 border-b border-slate-50 last:border-0 active:bg-slate-100 transition-colors"
-                    >
-                      <Navigation size={12} className="text-neda-orange shrink-0" />
-                      <span className="truncate leading-relaxed">{addr}</span>
-                    </button>
-                  ))
-                ) : hasAttemptedSearch && (
-                  <div className="px-5 py-12 text-center flex flex-col items-center gap-4 bg-slate-50/30">
-                    <div className="bg-white p-4 rounded-full shadow-sm"><MapPin size={24} className="text-slate-100" /></div>
-                    <div className="space-y-1">
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Searching for addresses...</p>
-                      <p className="text-[8px] font-bold text-slate-300 uppercase tracking-widest">Type more to refine results</p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
+            <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest pl-1 mt-2">Manual entry required</p>
           </div>
           <button 
-            disabled={addressInput.trim().length < 5} 
+            disabled={addressInput.trim().length < 2} 
             onClick={() => onConfirm(tool, addressInput.trim())} 
             className="w-full py-6 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-xl active:scale-[0.98] transition-all disabled:opacity-40 disabled:grayscale text-sm"
           >
@@ -1004,10 +961,14 @@ const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, onBiometricLogi
   const [forgotEmail, setForgotEmail] = useState('');
   const [tempPassResult, setTempPassResult] = useState<string | null>(null);
   const [isResetting, setIsResetting] = useState(false);
-  const handleSignIn = (e: React.FormEvent) => {
+  const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     const user = users.find((u: User) => u.email.toLowerCase() === email.trim().toLowerCase());
-    if (user && user.password === password) onLogin(user, rememberMe); else setError('Invalid Credentials.');
+    if (user && user.password === password) {
+      await onLogin(user, rememberMe);
+    } else {
+      setError('Invalid Credentials.');
+    }
   };
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-center p-6 text-center">
@@ -1031,7 +992,7 @@ const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, onBiometricLogi
       </div>
       {showForgotModal && (
         <div className="fixed inset-0 z-[600] bg-neda-navy/95 backdrop-blur-md flex items-center justify-center p-6 animate-in fade-in">
-          <div className="bg-white w-full max-w-sm rounded-[3rem] p-10 shadow-2xl text-center">
+          <div className="bg-white w-full max-sm rounded-[3rem] p-10 shadow-2xl text-center">
             {tempPassResult ? (
               <div className="animate-in zoom-in-95">
                 <div className="bg-green-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6"><Key size={32} className="text-green-600" /></div>
