@@ -19,6 +19,45 @@ const cleanPayload = (obj: any) => {
   );
 };
 
+// Helper to convert base64 to Blob for storage upload
+const base64ToBlob = (base64: string, contentType = 'image/png') => {
+  const byteString = atob(base64.split(',')[1]);
+  const ab = new ArrayBuffer(byteString.length);
+  const ia = new Uint8Array(ab);
+  for (let i = 0; i < byteString.length; i++) {
+    ia[i] = byteString.charCodeAt(i);
+  }
+  return new Blob([ab], { type: contentType });
+};
+
+/**
+ * Uploads a base64 image to Supabase Storage
+ * @param bucket Name of the bucket (e.g., 'tool-photos')
+ * @param path File path in bucket (e.g., 'tools/T123.png')
+ * @param base64 Full data URL or base64 string
+ */
+export const uploadFile = async (bucket: string, path: string, base64: string): Promise<string | null> => {
+  if (!supabase || !base64 || !base64.startsWith('data:')) return null;
+
+  try {
+    const blob = base64ToBlob(base64);
+    const { error } = await supabase.storage
+      .from(bucket)
+      .upload(path, blob, {
+        contentType: blob.type,
+        upsert: true
+      });
+
+    if (error) throw error;
+
+    const { data } = supabase.storage.from(bucket).getPublicUrl(path);
+    return data.publicUrl;
+  } catch (err) {
+    console.error("Storage Upload Error:", err);
+    return null;
+  }
+};
+
 // Map User for writing to Database
 const mapUserToDb = (user: User) => {
   const payload: any = {
@@ -30,8 +69,6 @@ const mapUserToDb = (user: User) => {
     is_enabled: user.isEnabled
   };
 
-  // Only include must_change_password if it's explicitly set to true
-  // to avoid errors on legacy schemas that haven't added the column yet
   if (user.mustChangePassword) {
     payload.must_change_password = true;
   }
@@ -104,8 +141,6 @@ export const upsertSingleUser = async (user: User) => {
       .upsert(fullData, { onConflict: 'id' });
     
     if (error) {
-      // If the error is specifically about the missing column, 
-      // try one more time without that specific field
       if (error.message.includes('must_change_password')) {
         const { must_change_password, ...safeData } = fullData;
         const { error: retryError } = await supabase

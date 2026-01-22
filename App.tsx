@@ -36,13 +36,16 @@ import {
   Edit,
   Trash2,
   Download,
-  Sparkles
+  Sparkles,
+  Image as ImageIcon,
+  Plus
 } from 'lucide-react';
 import { analyzeTools } from './services/geminiService';
-import { fetchTools, fetchUsers, upsertSingleTool, upsertSingleUser, deleteSingleUser } from './services/supabaseService';
+import { fetchTools, fetchUsers, upsertSingleTool, upsertSingleUser, deleteSingleUser, uploadFile } from './services/supabaseService';
 
 const TEMP_PASSWORD_PREFIX = "NEDA-RESET-";
 const BIOMETRIC_KEY = "neda_biometric_link";
+const PHOTO_BUCKET = "tool-photos";
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -288,8 +291,13 @@ const App: React.FC = () => {
   const handleAddTool = async (newTool: Tool) => {
     setIsSyncing(true);
     try {
-      await upsertSingleTool(newTool);
-      setTools(prev => [...prev, newTool]);
+      let finalTool = { ...newTool };
+      if (finalTool.mainPhoto && finalTool.mainPhoto.startsWith('data:')) {
+        const publicUrl = await uploadFile(PHOTO_BUCKET, `tools/${finalTool.id}.png`, finalTool.mainPhoto);
+        if (publicUrl) finalTool.mainPhoto = publicUrl;
+      }
+      await upsertSingleTool(finalTool);
+      setTools(prev => [...prev, finalTool]);
       setSyncSuccess(`Asset registered.`);
       setShowAddTool(false);
     } catch (e: any) {
@@ -316,8 +324,15 @@ const App: React.FC = () => {
   const updateTool = async (updatedTool: Tool) => {
     setIsSyncing(true);
     try {
-      await upsertSingleTool(updatedTool);
-      setTools(prev => prev.map(t => t.id === updatedTool.id ? updatedTool : t));
+      let finalTool = { ...updatedTool };
+      // If the main photo is a base64 string, it needs uploading
+      if (finalTool.mainPhoto && finalTool.mainPhoto.startsWith('data:')) {
+        const publicUrl = await uploadFile(PHOTO_BUCKET, `tools/${finalTool.id}_${Date.now()}.png`, finalTool.mainPhoto);
+        if (publicUrl) finalTool.mainPhoto = publicUrl;
+      }
+      await upsertSingleTool(finalTool);
+      setTools(prev => prev.map(t => t.id === finalTool.id ? finalTool : t));
+      if (selectedToolForDetail?.id === finalTool.id) setSelectedToolForDetail(finalTool);
       setSyncSuccess(`Database Sync Successful.`);
     } catch (e: any) {
       setSyncError("Sync Error: " + e.message);
@@ -328,68 +343,92 @@ const App: React.FC = () => {
 
   const handleReturnTool = async (comment: string, condition: string, photo?: string) => {
     if (!returningTool || !currentUser) return;
-    let newStatus = ToolStatus.AVAILABLE;
-    if (condition === 'defect identified' || condition === 'needs service') newStatus = ToolStatus.GETTING_SERVICED;
-    
-    const newLog: ToolLog = {
-      id: Math.random().toString(36).substr(2, 9),
-      userId: currentUser.id,
-      userName: currentUser.name,
-      action: 'RETURN',
-      timestamp: Date.now(),
-      comment,
-      condition,
-      photo
-    };
+    setIsSyncing(true);
+    try {
+      let newStatus = ToolStatus.AVAILABLE;
+      if (condition === 'defect identified' || condition === 'needs service') newStatus = ToolStatus.GETTING_SERVICED;
+      
+      let finalPhotoUrl = photo;
+      if (photo && photo.startsWith('data:')) {
+        const path = `logs/${returningTool.id}_${Date.now()}.png`;
+        const uploadedUrl = await uploadFile(PHOTO_BUCKET, path, photo);
+        if (uploadedUrl) finalPhotoUrl = uploadedUrl;
+      }
 
-    const updatedTool: Tool = {
-      ...returningTool,
-      status: newStatus,
-      currentHolderId: undefined,
-      currentHolderName: undefined,
-      currentSite: undefined,
-      bookedAt: undefined,
-      lastReturnedAt: Date.now(),
-      logs: [newLog, ...(returningTool.logs || [])].slice(0, 50)
-    };
-    setReturningTool(null);
-    await updateTool(updatedTool);
+      const newLog: ToolLog = {
+        id: Math.random().toString(36).substr(2, 9),
+        userId: currentUser.id,
+        userName: currentUser.name,
+        action: 'RETURN',
+        timestamp: Date.now(),
+        comment,
+        condition,
+        photo: finalPhotoUrl
+      };
+
+      const updatedTool: Tool = {
+        ...returningTool,
+        status: newStatus,
+        currentHolderId: undefined,
+        currentHolderName: undefined,
+        currentSite: undefined,
+        bookedAt: undefined,
+        lastReturnedAt: Date.now(),
+        logs: [newLog, ...(returningTool.logs || [])].slice(0, 50)
+      };
+      
+      await upsertSingleTool(updatedTool);
+      setTools(prev => prev.map(t => t.id === updatedTool.id ? updatedTool : t));
+      setReturningTool(null);
+      setSyncSuccess(`Return Complete.`);
+    } catch (e: any) {
+      setSyncError("Return Error: " + e.message);
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   const handleConfirmBookOut = async (tool: Tool, siteAddress: string, targetUserId?: string) => {
     if (!currentUser) return;
-    
-    // Determine who is getting the tool
-    const targetId = targetUserId || currentUser.id;
-    const targetUser = allUsers.find(u => u.id === targetId) || currentUser;
+    setIsSyncing(true);
+    try {
+      const targetId = targetUserId || currentUser.id;
+      const targetUser = allUsers.find(u => u.id === targetId) || currentUser;
 
-    const newLog: ToolLog = {
-      id: Math.random().toString(36).substr(2, 9),
-      userId: targetUser.id,
-      userName: targetUser.name,
-      action: 'BOOK_OUT',
-      timestamp: Date.now(),
-      site: siteAddress,
-      comment: targetId !== currentUser.id ? `Assigned to ${targetUser.name} by ${currentUser.name}` : undefined
-    };
+      const newLog: ToolLog = {
+        id: Math.random().toString(36).substr(2, 9),
+        userId: targetUser.id,
+        userName: targetUser.name,
+        action: 'BOOK_OUT',
+        timestamp: Date.now(),
+        site: siteAddress,
+        comment: targetId !== currentUser.id ? `Assigned to ${targetUser.name} by ${currentUser.name}` : undefined
+      };
 
-    const updatedTool: Tool = {
-      ...tool,
-      status: ToolStatus.BOOKED_OUT,
-      currentHolderId: targetUser.id,
-      currentHolderName: targetUser.name,
-      currentSite: siteAddress,
-      bookedAt: Date.now(),
-      logs: [newLog, ...(tool.logs || [])].slice(0, 50)
-    };
-    setBookingTool(null);
-    await updateTool(updatedTool);
+      const updatedTool: Tool = {
+        ...tool,
+        status: ToolStatus.BOOKED_OUT,
+        currentHolderId: targetUser.id,
+        currentHolderName: targetUser.name,
+        currentSite: siteAddress,
+        bookedAt: Date.now(),
+        logs: [newLog, ...(tool.logs || [])].slice(0, 50)
+      };
+      
+      await upsertSingleTool(updatedTool);
+      setTools(prev => prev.map(t => t.id === updatedTool.id ? updatedTool : t));
+      setBookingTool(null);
+      setSyncSuccess(`Deployment Successful.`);
+    } catch (e: any) {
+      setSyncError("Booking Error: " + e.message);
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   const handleAddLogToTool = async (tool: Tool, log: ToolLog) => {
     const updatedTool = { ...tool, logs: [log, ...(tool.logs || [])].slice(0, 50) };
     await updateTool(updatedTool);
-    if (selectedToolForDetail?.id === tool.id) setSelectedToolForDetail(updatedTool);
   };
 
   const handleDownloadCSV = () => {
@@ -526,6 +565,7 @@ const App: React.FC = () => {
           currentUser={currentUser}
           onClose={() => setSelectedToolForDetail(null)} 
           onAddLog={handleAddLogToTool}
+          onUpdateTool={updateTool}
         />
       )}
 
@@ -648,11 +688,14 @@ const EditUserModal: React.FC<{ user: User; onClose: () => void; onSave: (u: Use
   );
 };
 
-const ToolDetailModal: React.FC<{ tool: Tool; onClose: () => void; onAddLog: (tool: Tool, log: ToolLog) => void; users: User[]; currentUser: User }> = ({ tool, onClose, onAddLog, users, currentUser }) => {
+const ToolDetailModal: React.FC<{ tool: Tool; onClose: () => void; onAddLog: (tool: Tool, log: ToolLog) => void; users: User[]; currentUser: User; onUpdateTool: (t: Tool) => void }> = ({ tool, onClose, onAddLog, users, currentUser, onUpdateTool }) => {
   const [showAddLog, setShowAddLog] = useState(false);
   const [logsExpanded, setLogsExpanded] = useState(false);
   const [newLog, setNewLog] = useState({ action: 'BOOK_OUT' as any, comment: '', userId: currentUser.id });
   const history = useMemo(() => (tool.logs || []), [tool.logs]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const canEdit = currentUser.role === UserRole.ADMIN || currentUser.role === UserRole.MANAGER;
 
   const handleManualLog = () => {
     const matchedUser = users.find(u => u.id === newLog.userId);
@@ -670,19 +713,51 @@ const ToolDetailModal: React.FC<{ tool: Tool; onClose: () => void; onAddLog: (to
     setNewLog({ action: 'BOOK_OUT', comment: '', userId: currentUser.id });
   };
 
+  const handleUpdatePhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        onUpdateTool({ ...tool, mainPhoto: reader.result as string });
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-[750] bg-neda-navy/95 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-6 animate-in fade-in">
       <div className="bg-white w-full max-lg h-[90vh] sm:h-auto sm:max-h-[85vh] rounded-t-[3rem] sm:rounded-[3rem] shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-10">
         <div className="p-8 border-b border-slate-50 flex justify-between items-start shrink-0">
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-[8px] font-black text-neda-orange bg-neda-lightOrange px-2 py-0.5 rounded uppercase tracking-[0.2em]">{tool.category}</span>
-              <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded ${tool.status === ToolStatus.AVAILABLE ? 'bg-green-50 text-green-600' : 'bg-orange-50 text-orange-600'}`}>{tool.status.replace('_', ' ')}</span>
-            </div>
-            <h2 className="text-2xl font-black text-neda-navy uppercase tracking-tight leading-tight">{tool.name}</h2>
-            <div className="flex items-center gap-3 mt-1.5">
-               <span className="text-[10px] font-bold text-slate-400 uppercase">SN: {tool.serialNumber || 'No Serial'}</span>
-               {tool.dateOfPurchase && <span className="text-[10px] font-bold text-slate-300 uppercase">Purchased: {new Date(tool.dateOfPurchase).toLocaleDateString()}</span>}
+          <div className="flex gap-4">
+             <div 
+              className={`w-20 h-20 rounded-2xl flex items-center justify-center overflow-hidden border-2 border-slate-100 shrink-0 relative ${canEdit ? 'cursor-pointer' : ''}`}
+              onClick={() => canEdit && fileInputRef.current?.click()}
+             >
+               {tool.mainPhoto ? (
+                 <img src={tool.mainPhoto} className="w-full h-full object-cover" />
+               ) : (
+                 <div className="bg-slate-50 w-full h-full flex items-center justify-center">
+                   <ImageIcon size={24} className="text-slate-200" />
+                 </div>
+               )}
+               {canEdit && (
+                 <div className="absolute inset-0 bg-black/40 opacity-0 hover:opacity-100 flex items-center justify-center transition-opacity">
+                    <Camera size={18} className="text-white" />
+                 </div>
+               )}
+               <input type="file" ref={fileInputRef} accept="image/*" className="hidden" onChange={handleUpdatePhoto} />
+             </div>
+
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-[8px] font-black text-neda-orange bg-neda-lightOrange px-2 py-0.5 rounded uppercase tracking-[0.2em]">{tool.category}</span>
+                <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded ${tool.status === ToolStatus.AVAILABLE ? 'bg-green-50 text-green-600' : 'bg-orange-50 text-orange-600'}`}>{tool.status.replace('_', ' ')}</span>
+              </div>
+              <h2 className="text-2xl font-black text-neda-navy uppercase tracking-tight leading-tight">{tool.name}</h2>
+              <div className="flex items-center gap-3 mt-1.5">
+                 <span className="text-[10px] font-bold text-slate-400 uppercase">SN: {tool.serialNumber || 'No Serial'}</span>
+                 {tool.dateOfPurchase && <span className="text-[10px] font-bold text-slate-300 uppercase">Purchased: {new Date(tool.dateOfPurchase).toLocaleDateString()}</span>}
+              </div>
             </div>
           </div>
           <button onClick={onClose} className="p-3 bg-slate-50 rounded-2xl text-slate-400 hover:text-neda-navy transition-all"><X size={24} /></button>
@@ -753,6 +828,11 @@ const ToolDetailModal: React.FC<{ tool: Tool; onClose: () => void; onAddLog: (to
                             <p className="text-xs font-black text-neda-navy uppercase">{log.userName}</p>
                             {log.site && <div className="flex items-center gap-1.5 mt-1 text-slate-400"><MapPin size={10} /><span className="text-[9px] font-bold uppercase truncate">{log.site}</span></div>}
                             {log.comment && <p className="mt-2 p-3 bg-white rounded-xl text-[10px] font-medium text-slate-500 border border-slate-100 leading-relaxed shadow-sm">"{log.comment}"</p>}
+                            {log.photo && (
+                              <div className="mt-3 rounded-xl overflow-hidden border border-slate-100 shadow-sm max-w-[200px]">
+                                <img src={log.photo} className="w-full h-auto object-cover" />
+                              </div>
+                            )}
                           </div>
                         </div>
                       )) : (
@@ -778,7 +858,7 @@ const BookOutModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (tool
 
   return (
     <div className="fixed inset-0 z-[700] bg-neda-navy/95 backdrop-blur-md flex items-center justify-center p-6 animate-in fade-in">
-      <div className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 shadow-2xl animate-in zoom-in-95 relative overflow-hidden">
+      <div className="bg-white w-full max-sm rounded-[2.5rem] p-8 shadow-2xl animate-in zoom-in-95 relative overflow-hidden">
         <div className="flex justify-between items-start mb-8">
           <div className="flex flex-col">
             <span className="text-[10px] font-black text-neda-orange uppercase tracking-[0.2em] mb-2">Book Out</span>
@@ -885,7 +965,7 @@ const AddUserModal: React.FC<{ onClose: () => void; onSave: (u: User) => void }>
   const [formData, setFormData] = useState({ name: '', email: '', password: 'password123', role: UserRole.USER });
   return (
     <div className="fixed inset-0 z-[700] bg-neda-navy/95 backdrop-blur-md flex items-center justify-center p-6 animate-in fade-in">
-      <div className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 shadow-2xl">
+      <div className="bg-white w-full max-sm rounded-[2.5rem] p-8 shadow-2xl">
         <div className="flex justify-between items-center mb-6"><h2 className="text-xl font-black text-neda-navy uppercase">Onboard Staff</h2><button onClick={onClose} className="p-2 text-slate-300 hover:text-neda-navy"><X size={20} /></button></div>
         <form onSubmit={e => { e.preventDefault(); onSave({ id: 'U' + Date.now(), ...formData, isEnabled: true, mustChangePassword: true }); }} className="space-y-4">
           <input required className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm" placeholder="Full Name" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
@@ -903,12 +983,37 @@ const AddUserModal: React.FC<{ onClose: () => void; onSave: (u: User) => void }>
 };
 
 const AddToolModal: React.FC<{ onClose: () => void; onSave: (t: Tool) => void }> = ({ onClose, onSave }) => {
-  const [formData, setFormData] = useState({ name: '', category: 'Power Tools', serialNumber: '', notes: '', dateOfPurchase: new Date().toISOString().split('T')[0], numberOfItems: 1 });
+  const [formData, setFormData] = useState({ name: '', category: 'Power Tools', serialNumber: '', notes: '', dateOfPurchase: new Date().toISOString().split('T')[0], numberOfItems: 1, mainPhoto: undefined as string | undefined });
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => setFormData({ ...formData, mainPhoto: reader.result as string });
+      reader.readAsDataURL(file);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-[700] bg-neda-navy/95 backdrop-blur-md flex items-center justify-center p-6 animate-in fade-in">
-      <div className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 shadow-2xl max-h-[90vh] overflow-y-auto hide-scrollbar">
+      <div className="bg-white w-full max-sm rounded-[2.5rem] p-8 shadow-2xl max-h-[90vh] overflow-y-auto hide-scrollbar">
         <div className="flex justify-between items-center mb-6"><h2 className="text-xl font-black text-neda-navy uppercase">Add Equipment</h2><button onClick={onClose} className="p-2 text-slate-300 hover:text-neda-navy"><X size={20} /></button></div>
         <form onSubmit={e => { e.preventDefault(); onSave({ id: 'T' + Date.now(), ...formData, status: ToolStatus.AVAILABLE, logs: [] }); }} className="space-y-4">
+          <div 
+            onClick={() => fileInputRef.current?.click()} 
+            className="w-full aspect-video bg-slate-50 border-2 border-dashed border-slate-100 rounded-2xl flex flex-col items-center justify-center cursor-pointer overflow-hidden relative mb-4"
+          >
+            {formData.mainPhoto ? (
+              <img src={formData.mainPhoto} className="w-full h-full object-cover" />
+            ) : (
+              <div className="text-center">
+                <Camera size={24} className="text-slate-200 mx-auto mb-2" />
+                <span className="text-[9px] font-black text-slate-300 uppercase">Tool Photo</span>
+              </div>
+            )}
+            <input type="file" ref={fileInputRef} accept="image/*" className="hidden" onChange={handlePhotoUpload} />
+          </div>
           <input required className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm" placeholder="Tool Name" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
           <select className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm" value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})}>
             <option value="Power Tools">Power Tools</option>
@@ -940,7 +1045,7 @@ const MandatoryPasswordChange: React.FC<{ user: User; onUpdate: (u: User) => voi
   };
   return (
     <div className="fixed inset-0 z-[500] bg-neda-navy flex items-center justify-center p-6 animate-in fade-in">
-      <div className="bg-white w-full max-w-sm rounded-[3rem] p-10 shadow-2xl text-center">
+      <div className="bg-white w-full max-sm rounded-[3rem] p-10 shadow-2xl text-center">
         {isDone ? (
           <div className="py-8 animate-in zoom-in-95">
             <CheckCircle2 size={48} className="text-green-500 mx-auto mb-6" />
@@ -1065,15 +1170,24 @@ const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, status
         const isServiced = tool.status === ToolStatus.GETTING_SERVICED;
         return (
           <div key={tool.id} onClick={() => onViewDetail(tool)} className="px-6 py-5 flex items-center justify-between hover:bg-slate-50 transition-colors cursor-pointer">
-            <div className="flex-1 min-w-0 pr-4">
-              <div className="flex items-center gap-2 mb-1">
-                 <span className="text-[7px] font-black uppercase tracking-widest text-neda-orange bg-neda-lightOrange px-1.5 py-0.5 rounded-sm">{tool.category}</span>
-                 <div className={`w-1.5 h-1.5 rounded-full ${isAvailable ? 'bg-green-500' : isServiced ? 'bg-red-500' : 'bg-orange-500'}`}></div>
+            <div className="flex items-center gap-4 flex-1 min-w-0">
+              <div className="w-12 h-12 rounded-xl bg-slate-50 flex items-center justify-center overflow-hidden border border-slate-100 shrink-0">
+                {tool.mainPhoto ? (
+                  <img src={tool.mainPhoto} className="w-full h-full object-cover" />
+                ) : (
+                  <ImageIcon size={18} className="text-slate-200" />
+                )}
               </div>
-              <h3 className="font-black text-neda-navy text-sm uppercase tracking-tight truncate">{tool.name}</h3>
-              <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5">
-                 <div className="flex items-center gap-1.5 text-slate-400"><UserIcon size={10} /><span className="text-[9px] font-bold uppercase truncate max-w-[90px]">{isAvailable ? 'Warehouse' : (tool.currentHolderName || 'Staff')}</span></div>
-                 <div className="flex items-center gap-1.5 text-slate-400"><MapPin size={10} /><span className="text-[9px] font-bold uppercase truncate max-w-[110px]">{tool.currentSite || 'Warehouse'}</span></div>
+              <div className="min-w-0 pr-4">
+                <div className="flex items-center gap-2 mb-1">
+                   <span className="text-[7px] font-black uppercase tracking-widest text-neda-orange bg-neda-lightOrange px-1.5 py-0.5 rounded-sm">{tool.category}</span>
+                   <div className={`w-1.5 h-1.5 rounded-full ${isAvailable ? 'bg-green-500' : isServiced ? 'bg-red-500' : 'bg-orange-500'}`}></div>
+                </div>
+                <h3 className="font-black text-neda-navy text-sm uppercase tracking-tight truncate">{tool.name}</h3>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5">
+                   <div className="flex items-center gap-1.5 text-slate-400"><UserIcon size={10} /><span className="text-[9px] font-bold uppercase truncate max-w-[90px]">{isAvailable ? 'Warehouse' : (tool.currentHolderName || 'Staff')}</span></div>
+                   <div className="flex items-center gap-1.5 text-slate-400"><MapPin size={10} /><span className="text-[9px] font-bold uppercase truncate max-w-[110px]">{tool.currentSite || 'Warehouse'}</span></div>
+                </div>
               </div>
             </div>
             {(isAvailable || isHeldByMe) && <button onClick={(e) => { e.stopPropagation(); isAvailable ? onInitiateBookOut(tool) : onInitiateReturn(tool); }} className={`shrink-0 px-4 py-2.5 rounded-xl font-black text-[9px] uppercase tracking-widest shadow-md ${isAvailable ? 'bg-neda-navy text-white' : 'bg-white border border-neda-orange text-neda-orange'}`}>{isAvailable ? 'Book Out' : 'Return'}</button>}
@@ -1175,7 +1289,18 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
           </div>
           <div className="bg-white rounded-[2rem] border border-slate-100 overflow-hidden divide-y divide-slate-50 shadow-sm">
             {bookedTools.length > 0 ? bookedTools.map((t: Tool) => (
-              <div key={t.id} onClick={() => onViewDetail(t)} className="px-6 py-5 flex items-center justify-between hover:bg-slate-50 transition-colors"><div className="min-w-0 flex-1"><p className="font-black text-neda-navy text-xs uppercase truncate">{t.name}</p><p className="text-[9px] font-bold text-slate-400 uppercase">{t.currentHolderName} @ {t.currentSite}</p></div><ChevronRight size={16} className="text-slate-200" /></div>
+              <div key={t.id} onClick={() => onViewDetail(t)} className="px-6 py-5 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                <div className="flex items-center gap-4 flex-1 min-w-0">
+                  <div className="w-10 h-10 rounded-lg bg-slate-50 flex items-center justify-center overflow-hidden border border-slate-100 shrink-0">
+                    {t.mainPhoto ? <img src={t.mainPhoto} className="w-full h-full object-cover" /> : <ImageIcon size={16} className="text-slate-200" />}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-black text-neda-navy text-xs uppercase truncate">{t.name}</p>
+                    <p className="text-[9px] font-bold text-slate-400 uppercase">{t.currentHolderName} @ {t.currentSite}</p>
+                  </div>
+                </div>
+                <ChevronRight size={16} className="text-slate-200" />
+              </div>
             )) : <div className="px-6 py-12 text-center text-slate-300 uppercase text-[10px]">No active bookings</div>}
           </div>
         </div>
@@ -1191,7 +1316,21 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
             <input type="text" placeholder="Filter inventory..." className="w-full pl-11 pr-4 py-3 bg-white border border-slate-100 rounded-2xl font-bold text-[10px] outline-none shadow-sm" value={assetSearch} onChange={(e) => setAssetSearch(e.target.value)} />
           </div>
           <div className="grid gap-3">{filteredAssets.map(tool => (
-            <div key={tool.id} onClick={() => onViewDetail(tool)} className="bg-white p-5 rounded-[2rem] border border-slate-100 flex items-center justify-between shadow-sm cursor-pointer hover:bg-slate-50 transition-all"><div className="flex-1 min-w-0"><h4 className="font-black text-neda-navy text-sm uppercase truncate">{tool.name}</h4><div className="flex items-center gap-2 mt-1"><span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-sm ${tool.status === ToolStatus.AVAILABLE ? 'bg-green-50 text-green-600' : 'bg-orange-50 text-orange-600'}`}>{tool.status.replace('_', ' ')}</span><span className="text-[8px] font-bold text-slate-300 uppercase">SN: {tool.serialNumber || 'N/A'}</span></div></div><ChevronRight size={18} className="text-slate-200" /></div>
+            <div key={tool.id} onClick={() => onViewDetail(tool)} className="bg-white p-5 rounded-[2rem] border border-slate-100 flex items-center justify-between shadow-sm cursor-pointer hover:bg-slate-50 transition-all">
+              <div className="flex items-center gap-4 flex-1 min-w-0">
+                <div className="w-10 h-10 rounded-lg bg-slate-50 flex items-center justify-center overflow-hidden border border-slate-100 shrink-0">
+                  {tool.mainPhoto ? <img src={tool.mainPhoto} className="w-full h-full object-cover" /> : <ImageIcon size={16} className="text-slate-200" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h4 className="font-black text-neda-navy text-sm uppercase truncate">{tool.name}</h4>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-sm ${tool.status === ToolStatus.AVAILABLE ? 'bg-green-50 text-green-600' : 'bg-orange-50 text-orange-600'}`}>{tool.status.replace('_', ' ')}</span>
+                    <span className="text-[8px] font-bold text-slate-300 uppercase">SN: {tool.serialNumber || 'N/A'}</span>
+                  </div>
+                </div>
+              </div>
+              <ChevronRight size={18} className="text-slate-200" />
+            </div>
           ))}</div>
         </div>
       )}
@@ -1258,7 +1397,12 @@ const MyToolsView: React.FC<any> = ({ tools, currentUser, onInitiateReturn, onVi
       {tools.length === 0 ? <div className="text-center py-16 bg-white rounded-[2rem] border-dashed border border-slate-200 text-slate-300 font-black uppercase text-[10px]">No items</div> : tools.map((tool: Tool) => (
         <div key={tool.id} onClick={() => onViewDetail(tool)} className="bg-white p-6 rounded-[2rem] border border-slate-100 flex flex-col shadow-sm cursor-pointer hover:bg-slate-50 transition-colors">
           <div className="flex justify-between items-start mb-4">
-            <div><span className="text-[8px] font-bold text-slate-300 uppercase mb-0.5">{tool.category}</span><h3 className="font-black text-neda-navy uppercase text-sm">{tool.name}</h3></div>
+            <div className="flex items-center gap-4">
+               <div className="w-14 h-14 rounded-2xl bg-slate-50 flex items-center justify-center overflow-hidden border border-slate-100 shrink-0">
+                  {tool.mainPhoto ? <img src={tool.mainPhoto} className="w-full h-full object-cover" /> : <ImageIcon size={20} className="text-slate-200" />}
+               </div>
+               <div><span className="text-[8px] font-bold text-slate-300 uppercase mb-0.5">{tool.category}</span><h3 className="font-black text-neda-navy uppercase text-sm">{tool.name}</h3></div>
+            </div>
             <button onClick={(e) => { e.stopPropagation(); onInitiateReturn(tool); }} className="px-5 py-2.5 bg-slate-50 text-neda-orange rounded-xl font-black text-[10px] uppercase border border-neda-orange/10">Return</button>
           </div>
           <div className="mt-2 pt-4 border-t border-slate-50 flex items-center gap-2"><MapPin size={12} className="text-neda-orange" /><span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest truncate">{tool.currentSite || 'Warehouse'}</span></div>
