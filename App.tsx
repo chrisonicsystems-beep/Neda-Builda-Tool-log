@@ -38,10 +38,12 @@ import {
   Download,
   Sparkles,
   Image as ImageIcon,
-  Plus
+  Plus,
+  Wifi,
+  WifiOff
 } from 'lucide-react';
 import { analyzeTools } from './services/geminiService';
-import { fetchTools, fetchUsers, upsertSingleTool, upsertSingleUser, deleteSingleUser, uploadFile } from './services/supabaseService';
+import { fetchTools, fetchUsers, upsertSingleTool, upsertSingleUser, deleteSingleUser, uploadFile, supabase } from './services/supabaseService';
 
 const TEMP_PASSWORD_PREFIX = "NEDA-RESET-";
 const BIOMETRIC_KEY = "neda_biometric_link";
@@ -56,6 +58,7 @@ const App: React.FC = () => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncSuccess, setSyncSuccess] = useState<string | null>(null);
+  const [isSupabaseConnected, setIsSupabaseConnected] = useState(false);
   
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<ToolStatus | 'ALL'>('ALL');
@@ -77,8 +80,13 @@ const App: React.FC = () => {
       const remoteUsers = await fetchUsers();
       const remoteTools = await fetchTools();
 
-      let finalUsers = remoteUsers && remoteUsers.length > 0 ? remoteUsers : INITIAL_USERS;
-      let finalTools = remoteTools && remoteTools.length > 0 ? remoteTools : INITIAL_TOOLS;
+      // Only fall back to INITIAL data if the fetch returned NULL (connection error)
+      // If it returned an empty array [], that is "real" data from Supabase.
+      const isConnected = remoteUsers !== null && remoteTools !== null && !!supabase;
+      setIsSupabaseConnected(isConnected);
+
+      let finalUsers = (remoteUsers !== null) ? remoteUsers : INITIAL_USERS;
+      let finalTools = (remoteTools !== null) ? remoteTools : INITIAL_TOOLS;
 
       finalTools = finalTools.map(tool => {
         if (tool.currentHolderId) {
@@ -108,6 +116,7 @@ const App: React.FC = () => {
       return { finalUsers, finalTools };
     } catch (err) {
       console.error("Critical Data Load Error:", err);
+      setIsSupabaseConnected(false);
       return null;
     }
   };
@@ -325,7 +334,6 @@ const App: React.FC = () => {
     setIsSyncing(true);
     try {
       let finalTool = { ...updatedTool };
-      // If the main photo is a base64 string, it needs uploading
       if (finalTool.mainPhoto && finalTool.mainPhoto.startsWith('data:')) {
         const publicUrl = await uploadFile(PHOTO_BUCKET, `tools/${finalTool.id}_${Date.now()}.png`, finalTool.mainPhoto);
         if (publicUrl) finalTool.mainPhoto = publicUrl;
@@ -524,6 +532,8 @@ const App: React.FC = () => {
       isSyncing={isSyncing}
     >
       {currentUser.mustChangePassword && <MandatoryPasswordChange user={currentUser} onUpdate={updateUser} />}
+      
+      {/* Dynamic Status Notifications */}
       <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[100] w-full max-w-xs px-4 pointer-events-none">
         {isSyncing && (
           <div className="bg-neda-navy text-white px-4 py-3 rounded-2xl shadow-lg flex items-center justify-center gap-3 animate-in slide-in-from-top-4">
@@ -544,6 +554,18 @@ const App: React.FC = () => {
             <button onClick={() => setSyncError(null)} className="p-1"><X size={12}/></button>
           </div>
         )}
+      </div>
+
+      {/* Connectivity Indicator */}
+      <div className="mb-6 flex justify-between items-center px-2">
+         <div>
+            <h2 className="text-2xl font-black text-neda-navy uppercase tracking-tight">Inventory</h2>
+            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{tools.length} Items Managed</p>
+         </div>
+         <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border ${isSupabaseConnected ? 'bg-green-50 border-green-100 text-green-600' : 'bg-orange-50 border-orange-100 text-orange-600'}`}>
+            {isSupabaseConnected ? <Wifi size={12} /> : <WifiOff size={12} />}
+            <span className="text-[8px] font-black uppercase tracking-widest">{isSupabaseConnected ? 'Live' : 'Offline Mode'}</span>
+         </div>
       </div>
 
       {showAddUser && <AddUserModal onClose={() => setShowAddUser(false)} onSave={handleAddUser} />}
@@ -1195,7 +1217,7 @@ const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, status
             {isServiced && <div className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-600 rounded-lg text-[8px] font-black uppercase"><Stethoscope size={10} />Repair</div>}
           </div>
         );
-      }) : <div className="px-6 py-12 text-center text-[10px] font-black text-slate-300 uppercase">No items found</div>}
+      }) : <div className="px-6 py-12 text-center text-[10px] font-black text-slate-300 uppercase italic">No items currently in database</div>}
     </div>
   </div>
 );
