@@ -1351,39 +1351,23 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
             <input type="text" placeholder="Filter inventory..." className="w-full pl-11 pr-4 py-3 bg-white border border-slate-100 rounded-2xl font-bold text-[10px] outline-none shadow-sm" value={assetSearch} onChange={(e) => setAssetSearch(e.target.value)} />
           </div>
-          <div className="grid gap-3">{filteredAssets.map(tool => {
-            const isBooked = tool.status === ToolStatus.BOOKED_OUT;
-            return (
-              <div key={tool.id} onClick={() => onViewDetail(tool)} className="bg-white p-5 rounded-[2rem] border border-slate-100 flex items-center justify-between shadow-sm cursor-pointer hover:bg-slate-50 transition-all">
-                <div className="flex items-center gap-4 flex-1 min-w-0">
-                  <div className="w-12 h-12 rounded-xl bg-slate-50 flex items-center justify-center overflow-hidden border border-slate-100 shrink-0">
-                    {tool.mainPhoto ? <img src={tool.mainPhoto} className="w-full h-full object-cover" /> : <ImageIcon size={16} className="text-slate-200" />}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <h4 className="font-black text-neda-navy text-sm uppercase truncate">{tool.name}</h4>
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
-                      <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-sm shrink-0 ${tool.status === ToolStatus.AVAILABLE ? 'bg-green-50 text-green-600' : 'bg-orange-50 text-orange-600'}`}>{tool.status.replace('_', ' ')}</span>
-                      {isBooked ? (
-                        <div className="flex items-center gap-1.5 text-slate-400 shrink-0">
-                          <UserIcon size={10} />
-                          <span className="text-[8px] font-bold uppercase truncate max-w-[100px]">{tool.currentHolderName || 'Staff'}</span>
-                        </div>
-                      ) : (
-                        <span className="text-[8px] font-bold text-slate-300 uppercase">SN: {tool.serialNumber || 'N/A'}</span>
-                      )}
-                      {isBooked && tool.currentSite && (
-                        <div className="flex items-center gap-1 text-slate-400 shrink-0">
-                          <MapPin size={10} />
-                          <span className="text-[8px] font-bold uppercase truncate max-w-[120px]">{tool.currentSite}</span>
-                        </div>
-                      )}
-                    </div>
+          <div className="grid gap-3">{filteredAssets.map(tool => (
+            <div key={tool.id} onClick={() => onViewDetail(tool)} className="bg-white p-5 rounded-[2rem] border border-slate-100 flex items-center justify-between shadow-sm cursor-pointer hover:bg-slate-50 transition-all">
+              <div className="flex items-center gap-4 flex-1 min-w-0">
+                <div className="w-10 h-10 rounded-lg bg-slate-50 flex items-center justify-center overflow-hidden border border-slate-100 shrink-0">
+                  {tool.mainPhoto ? <img src={tool.mainPhoto} className="w-full h-full object-cover" /> : <ImageIcon size={16} className="text-slate-200" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h4 className="font-black text-neda-navy text-sm uppercase truncate">{tool.name}</h4>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-sm ${tool.status === ToolStatus.AVAILABLE ? 'bg-green-50 text-green-600' : 'bg-orange-50 text-orange-600'}`}>{tool.status.replace('_', ' ')}</span>
+                    <span className="text-[8px] font-bold text-slate-300 uppercase">SN: {tool.serialNumber || 'N/A'}</span>
                   </div>
                 </div>
-                <ChevronRight size={18} className="text-slate-200" />
               </div>
-            );
-          })}</div>
+              <ChevronRight size={18} className="text-slate-200" />
+            </div>
+          ))}</div>
         </div>
       )}
       {activeTab === 'HEALTH' && (
