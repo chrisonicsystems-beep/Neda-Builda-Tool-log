@@ -19,6 +19,37 @@ const cleanPayload = (obj: any) => {
   );
 };
 
+/**
+ * Utility to retry a function if it fails, helpful for statement timeouts.
+ */
+const fetchWithRetry = async <T>(
+  fetchFn: () => Promise<{ data: T | null; error: any }>,
+  retries = 3,
+  delay = 1000
+): Promise<{ data: T | null; error: any }> => {
+  let lastError: any;
+  for (let i = 0; i < retries; i++) {
+    try {
+      const result = await fetchFn();
+      if (!result.error) return result;
+      lastError = result.error;
+      
+      // If it's a statement timeout (57014), wait a bit longer before retry
+      const isTimeout = lastError?.code === '57014' || lastError?.message?.includes('timeout');
+      if (isTimeout) {
+        console.warn(`Statement timeout detected, retrying (${i + 1}/${retries})...`);
+        await new Promise(resolve => setTimeout(resolve, delay * (i + 1) * 2));
+      } else {
+        await new Promise(resolve => setTimeout(resolve, delay * (i + 1)));
+      }
+    } catch (err) {
+      lastError = err;
+      await new Promise(resolve => setTimeout(resolve, delay * (i + 1)));
+    }
+  }
+  return { data: null, error: lastError };
+};
+
 // Helper to convert base64 to Blob for storage upload
 const base64ToBlob = (base64: string, contentType = 'image/png') => {
   const byteString = atob(base64.split(',')[1]);
@@ -32,9 +63,6 @@ const base64ToBlob = (base64: string, contentType = 'image/png') => {
 
 /**
  * Uploads a base64 image to Supabase Storage
- * @param bucket Name of the bucket (e.g., 'tool-photos')
- * @param path File path in bucket (e.g., 'tools/T123.png')
- * @param base64 Full data URL or base64 string
  */
 export const uploadFile = async (bucket: string, path: string, base64: string): Promise<string | null> => {
   if (!supabase || !base64 || !base64.startsWith('data:')) return null;
@@ -95,7 +123,7 @@ const mapToolToDb = (tool: Tool) => {
     current_holder_id: tool.currentHolderId || null,
     current_holder_name: tool.currentHolderName || null,
     current_site: tool.currentSite || null,
-    main_photo: tool.mainPhoto || null,
+    main_photo: tool.main_photo || tool.mainPhoto || null,
     notes: (tool.notes === undefined || tool.notes === null) ? '' : String(tool.notes),
     date_of_purchase: tool.dateOfPurchase || null,
     number_of_items: tool.numberOfItems || 1,
@@ -165,22 +193,30 @@ export const deleteSingleUser = async (userId: string) => {
 
 export const fetchTools = async (): Promise<{ data: Tool[] | null; error: any }> => {
   if (!supabase) return { data: null, error: 'Supabase client not initialized' };
-  const { data, error } = await supabase.from('tools').select('*');
-  if (error) {
-    console.error("Supabase Fetch Tools Error:", error);
-    return { data: null, error };
+  
+  const result = await fetchWithRetry(async () => {
+    return await supabase.from('tools').select('*');
+  });
+
+  if (result.error) {
+    console.error("Supabase Fetch Tools Error:", result.error);
+    return { data: null, error: result.error };
   }
-  return { data: data.map(mapDbToTool), error: null };
+  return { data: (result.data || []).map(mapDbToTool), error: null };
 };
 
 export const fetchUsers = async (): Promise<{ data: User[] | null; error: any }> => {
   if (!supabase) return { data: null, error: 'Supabase client not initialized' };
-  const { data, error } = await supabase.from('users').select('*');
-  if (error) {
-    console.error("Supabase Fetch Users Error:", error);
-    return { data: null, error };
+  
+  const result = await fetchWithRetry(async () => {
+    return await supabase.from('users').select('*');
+  });
+
+  if (result.error) {
+    console.error("Supabase Fetch Users Error:", result.error);
+    return { data: null, error: result.error };
   }
-  return { data: data.map(dbUser => mapDbToUser(dbUser)), error: null };
+  return { data: (result.data || []).map(dbUser => mapDbToUser(dbUser)), error: null };
 };
 
 export const syncTools = async (tools: Tool[]) => {

@@ -40,7 +40,8 @@ import {
   Image as ImageIcon,
   Plus,
   Wifi,
-  WifiOff
+  WifiOff,
+  RefreshCw
 } from 'lucide-react';
 import { analyzeTools } from './services/geminiService';
 import { fetchTools, fetchUsers, upsertSingleTool, upsertSingleUser, deleteSingleUser, uploadFile, supabase } from './services/supabaseService';
@@ -77,23 +78,30 @@ const App: React.FC = () => {
 
   const loadData = async () => {
     try {
-      const { data: remoteUsers, error: userError } = await fetchUsers();
-      const { data: remoteTools, error: toolError } = await fetchTools();
+      // Fetch in parallel for better performance and to reduce timeout risk
+      const [userResponse, toolResponse] = await Promise.all([
+        fetchUsers(),
+        fetchTools()
+      ]);
+
+      const userError = userResponse.error;
+      const toolError = toolResponse.error;
+      const remoteUsers = userResponse.data;
+      const remoteTools = toolResponse.data;
 
       if (userError || toolError) {
         const errorMsg = toolError?.message || userError?.message || 'Database connection failure';
-        setSyncError(`Supabase Error: ${errorMsg}`);
+        const isTimeout = errorMsg.toLowerCase().includes('timeout') || errorMsg.includes('57014');
+        setSyncError(isTimeout ? `Network Delay: Request Timed Out` : `Supabase Error: ${errorMsg}`);
         setIsSupabaseConnected(false);
       } else {
         setIsSupabaseConnected(true);
+        setSyncError(null);
       }
 
-      // If remote data is totally absent (null result from fetch function), fallback to mock
-      // If remote data is an empty array [], it means the table is empty but connected.
       let finalUsers = (remoteUsers !== null) ? remoteUsers : INITIAL_USERS;
       let finalTools = (remoteTools !== null) ? remoteTools : INITIAL_TOOLS;
 
-      // Ensure data integrity by mapping names to IDs if they were somehow lost
       finalTools = finalTools.map(tool => {
         if (tool.currentHolderId && !tool.currentHolderName) {
           const matchedUser = finalUsers.find(u => String(u.id).trim().toLowerCase() === String(tool.currentHolderId).trim().toLowerCase());
@@ -122,7 +130,7 @@ const App: React.FC = () => {
       return { finalUsers, finalTools };
     } catch (err: any) {
       console.error("Critical Data Load Error:", err);
-      setSyncError(`Load Error: ${err.message}`);
+      setSyncError(`System Error: ${err.message}`);
       setIsSupabaseConnected(false);
       return null;
     }
@@ -221,11 +229,9 @@ const App: React.FC = () => {
     setIsSyncing(true);
     let repairedCount = 0;
     try {
-      const { data: remoteUsers } = await fetchUsers();
-      const { data: remoteTools } = await fetchTools();
-      
-      const usersToUse = remoteUsers || INITIAL_USERS;
-      const toolsToFix = (remoteTools || []).filter(tool => (tool.currentHolderName && !tool.currentHolderId) || (tool.currentHolderId && !tool.currentHolderName));
+      const [uRes, tRes] = await Promise.all([fetchUsers(), fetchTools()]);
+      const usersToUse = uRes.data || INITIAL_USERS;
+      const toolsToFix = (tRes.data || []).filter(tool => (tool.currentHolderName && !tool.currentHolderId) || (tool.currentHolderId && !tool.currentHolderName));
       
       if (toolsToFix.length === 0) {
         setSyncSuccess("Inventory integrity verified.");
@@ -513,7 +519,7 @@ const App: React.FC = () => {
     <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 p-6 text-center">
       <NedaLogo size={48} className="mb-6 animate-pulse opacity-20" />
       <Loader2 className="w-8 h-8 animate-spin text-neda-navy mb-4" />
-      <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Syncing Engine...</p>
+      <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Connecting to Neda Cloud...</p>
     </div>
   );
 
@@ -562,10 +568,18 @@ const App: React.FC = () => {
           </div>
         )}
         {syncError && (
-          <div className="bg-red-500 text-white px-4 py-3 rounded-2xl shadow-xl flex items-center gap-3 animate-in slide-in-from-top-4 pointer-events-auto">
-            <AlertTriangle size={18} className="shrink-0" />
-            <span className="text-[10px] font-black uppercase tracking-widest flex-1">{syncError}</span>
-            <button onClick={() => setSyncError(null)} className="p-1 pointer-events-auto"><X size={12}/></button>
+          <div className="bg-red-500 text-white px-4 py-3 rounded-2xl shadow-xl flex flex-col gap-2 animate-in slide-in-from-top-4 pointer-events-auto border-2 border-white/20">
+            <div className="flex items-center gap-3">
+              <AlertTriangle size={18} className="shrink-0" />
+              <span className="text-[10px] font-black uppercase tracking-widest flex-1 leading-tight">{syncError}</span>
+              <button onClick={() => setSyncError(null)} className="p-1 pointer-events-auto"><X size={12}/></button>
+            </div>
+            <button 
+              onClick={handleManualRefresh}
+              className="mt-1 flex items-center justify-center gap-2 py-2 bg-white/20 rounded-lg text-[9px] font-black uppercase hover:bg-white/30 transition-all"
+            >
+              <RefreshCw size={12} className={isSyncing ? 'animate-spin' : ''} /> Retry Connection
+            </button>
           </div>
         )}
       </div>
@@ -576,10 +590,14 @@ const App: React.FC = () => {
             <h2 className="text-2xl font-black text-neda-navy uppercase tracking-tight">Inventory</h2>
             <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{tools.length} Items Managed</p>
          </div>
-         <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border transition-colors ${isSupabaseConnected ? 'bg-green-50 border-green-100 text-green-600' : 'bg-red-50 border-red-100 text-red-600'}`}>
+         <button 
+           onClick={handleManualRefresh}
+           disabled={isSyncing}
+           className={`flex items-center gap-2 px-3 py-1.5 rounded-full border transition-all active:scale-95 ${isSupabaseConnected ? 'bg-green-50 border-green-100 text-green-600' : 'bg-red-50 border-red-100 text-red-600 animate-pulse'}`}
+         >
             {isSupabaseConnected ? <Wifi size={12} /> : <WifiOff size={12} />}
-            <span className="text-[8px] font-black uppercase tracking-widest">{isSupabaseConnected ? 'Live' : 'DB Error'}</span>
-         </div>
+            <span className="text-[8px] font-black uppercase tracking-widest">{isSupabaseConnected ? 'Live' : 'Reconnect'}</span>
+         </button>
       </div>
 
       {showAddUser && <AddUserModal onClose={() => setShowAddUser(false)} onSave={handleAddUser} />}
