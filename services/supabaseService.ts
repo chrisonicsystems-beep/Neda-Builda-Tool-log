@@ -163,24 +163,24 @@ export const deleteSingleUser = async (userId: string) => {
   if (error) throw error;
 };
 
-export const fetchTools = async (): Promise<Tool[] | null> => {
-  if (!supabase) return null;
+export const fetchTools = async (): Promise<{ data: Tool[] | null; error: any }> => {
+  if (!supabase) return { data: null, error: 'Supabase client not initialized' };
   const { data, error } = await supabase.from('tools').select('*');
   if (error) {
     console.error("Supabase Fetch Tools Error:", error);
-    return null;
+    return { data: null, error };
   }
-  return data.map(mapDbToTool);
+  return { data: data.map(mapDbToTool), error: null };
 };
 
-export const fetchUsers = async (): Promise<User[] | null> => {
-  if (!supabase) return null;
+export const fetchUsers = async (): Promise<{ data: User[] | null; error: any }> => {
+  if (!supabase) return { data: null, error: 'Supabase client not initialized' };
   const { data, error } = await supabase.from('users').select('*');
   if (error) {
     console.error("Supabase Fetch Users Error:", error);
-    return null;
+    return { data: null, error };
   }
-  return data.map(dbUser => mapDbToUser(dbUser));
+  return { data: data.map(dbUser => mapDbToUser(dbUser)), error: null };
 };
 
 export const syncTools = async (tools: Tool[]) => {

@@ -77,19 +77,25 @@ const App: React.FC = () => {
 
   const loadData = async () => {
     try {
-      const remoteUsers = await fetchUsers();
-      const remoteTools = await fetchTools();
+      const { data: remoteUsers, error: userError } = await fetchUsers();
+      const { data: remoteTools, error: toolError } = await fetchTools();
 
-      // Only fall back to INITIAL data if the fetch returned NULL (connection error)
-      // If it returned an empty array [], that is "real" data from Supabase.
-      const isConnected = remoteUsers !== null && remoteTools !== null && !!supabase;
-      setIsSupabaseConnected(isConnected);
+      if (userError || toolError) {
+        const errorMsg = toolError?.message || userError?.message || 'Database connection failure';
+        setSyncError(`Supabase Error: ${errorMsg}`);
+        setIsSupabaseConnected(false);
+      } else {
+        setIsSupabaseConnected(true);
+      }
 
+      // If remote data is totally absent (null result from fetch function), fallback to mock
+      // If remote data is an empty array [], it means the table is empty but connected.
       let finalUsers = (remoteUsers !== null) ? remoteUsers : INITIAL_USERS;
       let finalTools = (remoteTools !== null) ? remoteTools : INITIAL_TOOLS;
 
+      // Ensure data integrity by mapping names to IDs if they were somehow lost
       finalTools = finalTools.map(tool => {
-        if (tool.currentHolderId) {
+        if (tool.currentHolderId && !tool.currentHolderName) {
           const matchedUser = finalUsers.find(u => String(u.id).trim().toLowerCase() === String(tool.currentHolderId).trim().toLowerCase());
           if (matchedUser) {
             return { 
@@ -114,8 +120,9 @@ const App: React.FC = () => {
       }
 
       return { finalUsers, finalTools };
-    } catch (err) {
+    } catch (err: any) {
       console.error("Critical Data Load Error:", err);
+      setSyncError(`Load Error: ${err.message}`);
       setIsSupabaseConnected(false);
       return null;
     }
@@ -147,10 +154,13 @@ const App: React.FC = () => {
 
   const handleManualRefresh = async () => {
     setIsSyncing(true);
+    setSyncError(null);
     await loadData();
     setIsSyncing(false);
-    setSyncSuccess("Inventory Refreshed");
-    setTimeout(() => setSyncSuccess(null), 2000);
+    if (!syncError) {
+      setSyncSuccess("Inventory Refreshed");
+      setTimeout(() => setSyncSuccess(null), 2000);
+    }
   };
 
   const handleLinkBiometrics = async () => {
@@ -211,20 +221,24 @@ const App: React.FC = () => {
     setIsSyncing(true);
     let repairedCount = 0;
     try {
-      const remoteUsers = await fetchUsers() || INITIAL_USERS;
-      const remoteTools = await fetchTools() || INITIAL_TOOLS;
-      const toolsToFix = remoteTools.filter(tool => (tool.currentHolderName && !tool.currentHolderId) || (tool.currentHolderId && !tool.currentHolderName));
+      const { data: remoteUsers } = await fetchUsers();
+      const { data: remoteTools } = await fetchTools();
+      
+      const usersToUse = remoteUsers || INITIAL_USERS;
+      const toolsToFix = (remoteTools || []).filter(tool => (tool.currentHolderName && !tool.currentHolderId) || (tool.currentHolderId && !tool.currentHolderName));
+      
       if (toolsToFix.length === 0) {
         setSyncSuccess("Inventory integrity verified.");
         setTimeout(() => setSyncSuccess(null), 3000);
         return;
       }
+      
       for (const tool of toolsToFix) {
         let matchedUser: User | undefined;
         if (tool.currentHolderId) {
-          matchedUser = remoteUsers.find(u => String(u.id) === String(tool.currentHolderId));
+          matchedUser = usersToUse.find(u => String(u.id) === String(tool.currentHolderId));
         } else if (tool.currentHolderName) {
-          matchedUser = remoteUsers.find(u => u.name.trim().toLowerCase() === tool.currentHolderName?.trim().toLowerCase());
+          matchedUser = usersToUse.find(u => u.name.trim().toLowerCase() === tool.currentHolderName?.trim().toLowerCase());
         }
         if (matchedUser) {
           const repairedTool: Tool = { ...tool, currentHolderId: matchedUser.id, currentHolderName: matchedUser.name, status: ToolStatus.BOOKED_OUT };
@@ -551,7 +565,7 @@ const App: React.FC = () => {
           <div className="bg-red-500 text-white px-4 py-3 rounded-2xl shadow-xl flex items-center gap-3 animate-in slide-in-from-top-4 pointer-events-auto">
             <AlertTriangle size={18} className="shrink-0" />
             <span className="text-[10px] font-black uppercase tracking-widest flex-1">{syncError}</span>
-            <button onClick={() => setSyncError(null)} className="p-1"><X size={12}/></button>
+            <button onClick={() => setSyncError(null)} className="p-1 pointer-events-auto"><X size={12}/></button>
           </div>
         )}
       </div>
@@ -562,9 +576,9 @@ const App: React.FC = () => {
             <h2 className="text-2xl font-black text-neda-navy uppercase tracking-tight">Inventory</h2>
             <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{tools.length} Items Managed</p>
          </div>
-         <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border ${isSupabaseConnected ? 'bg-green-50 border-green-100 text-green-600' : 'bg-orange-50 border-orange-100 text-orange-600'}`}>
+         <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border transition-colors ${isSupabaseConnected ? 'bg-green-50 border-green-100 text-green-600' : 'bg-red-50 border-red-100 text-red-600'}`}>
             {isSupabaseConnected ? <Wifi size={12} /> : <WifiOff size={12} />}
-            <span className="text-[8px] font-black uppercase tracking-widest">{isSupabaseConnected ? 'Live' : 'Offline Mode'}</span>
+            <span className="text-[8px] font-black uppercase tracking-widest">{isSupabaseConnected ? 'Live' : 'DB Error'}</span>
          </div>
       </div>
 
@@ -1217,7 +1231,7 @@ const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, status
             {isServiced && <div className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-600 rounded-lg text-[8px] font-black uppercase"><Stethoscope size={10} />Repair</div>}
           </div>
         );
-      }) : <div className="px-6 py-12 text-center text-[10px] font-black text-slate-300 uppercase italic">No items currently in database</div>}
+      }) : <div className="px-6 py-12 text-center text-[10px] font-black text-slate-300 uppercase italic">No items found in database</div>}
     </div>
   </div>
 );
