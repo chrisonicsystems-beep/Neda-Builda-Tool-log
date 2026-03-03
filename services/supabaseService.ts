@@ -123,7 +123,8 @@ const mapToolToDb = (tool: Tool) => {
     current_holder_id: tool.currentHolderId || null,
     current_holder_name: tool.currentHolderName || null,
     current_site: tool.currentSite || null,
-    main_photo: tool.main_photo || tool.mainPhoto || null,
+    // Fix: Removed incorrect reference to tool.main_photo (Property does not exist on type Tool)
+    main_photo: tool.mainPhoto || null,
     notes: (tool.notes === undefined || tool.notes === null) ? '' : String(tool.notes),
     date_of_purchase: tool.dateOfPurchase || null,
     number_of_items: tool.numberOfItems || 1,
@@ -194,7 +195,8 @@ export const deleteSingleUser = async (userId: string) => {
 export const fetchTools = async (): Promise<{ data: Tool[] | null; error: any }> => {
   if (!supabase) return { data: null, error: 'Supabase client not initialized' };
   
-  const result = await fetchWithRetry(async () => {
+  // Fix: Explicitly type fetchWithRetry to any[] to avoid 'unknown' mapping errors
+  const result = await fetchWithRetry<any[]>(async () => {
     return await supabase.from('tools').select('*');
   });
 
@@ -208,7 +210,8 @@ export const fetchTools = async (): Promise<{ data: Tool[] | null; error: any }>
 export const fetchUsers = async (): Promise<{ data: User[] | null; error: any }> => {
   if (!supabase) return { data: null, error: 'Supabase client not initialized' };
   
-  const result = await fetchWithRetry(async () => {
+  // Fix: Explicitly type fetchWithRetry to any[] to avoid 'unknown' mapping errors
+  const result = await fetchWithRetry<any[]>(async () => {
     return await supabase.from('users').select('*');
   });
 

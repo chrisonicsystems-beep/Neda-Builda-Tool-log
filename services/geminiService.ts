@@ -1,6 +1,7 @@
 
 import { GoogleGenAI } from "@google/genai";
 import { Tool } from "../types";
+import { DEFAULT_WAREHOUSE } from "../constants";
 
 // Analyze tools using the text-focused model
 export const analyzeTools = async (tools: Tool[], query: string): Promise<string> => {
@@ -11,7 +12,7 @@ export const analyzeTools = async (tools: Tool[], query: string): Promise<string
     status: t.status,
     category: t.category,
     holder: t.currentHolderName || 'None',
-    site: t.currentSite || 'Warehouse',
+    site: t.currentSite || DEFAULT_WAREHOUSE,
     lastAction: t.logs.length > 0 ? new Date(t.logs[t.logs.length-1].timestamp).toLocaleDateString() : 'N/A'
   }));
 

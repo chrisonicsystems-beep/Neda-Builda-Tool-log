@@ -45,6 +45,7 @@ import {
 } from 'lucide-react';
 import { analyzeTools } from './services/geminiService';
 import { fetchTools, fetchUsers, upsertSingleTool, upsertSingleUser, deleteSingleUser, uploadFile, supabase } from './services/supabaseService';
+import { WAREHOUSES, DEFAULT_WAREHOUSE } from './constants';
 
 const TEMP_PASSWORD_PREFIX = "NEDA-RESET-";
 const BIOMETRIC_KEY = "neda_biometric_link";
@@ -63,6 +64,7 @@ const App: React.FC = () => {
   
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<ToolStatus | 'ALL'>('ALL');
+  const [warehouseFilter, setWarehouseFilter] = useState<string | 'ALL'>('ALL');
   const [sortOrder, setSortOrder] = useState<'ASC' | 'DESC' | 'NONE'>('NONE');
   const [showFilters, setShowFilters] = useState(false);
   
@@ -231,7 +233,11 @@ const App: React.FC = () => {
     try {
       const [uRes, tRes] = await Promise.all([fetchUsers(), fetchTools()]);
       const usersToUse = uRes.data || INITIAL_USERS;
-      const toolsToFix = (tRes.data || []).filter(tool => (tool.currentHolderName && !tool.currentHolderId) || (tool.currentHolderId && !tool.currentHolderName));
+      const toolsToFix = (tRes.data || []).filter(tool => 
+        (tool.currentHolderName && !tool.currentHolderId) || 
+        (tool.currentHolderId && !tool.currentHolderName) ||
+        (tool.status === ToolStatus.AVAILABLE && (!tool.currentSite || tool.currentSite === DEFAULT_WAREHOUSE || tool.currentSite === 'Warehouse'))
+      );
       
       if (toolsToFix.length === 0) {
         setSyncSuccess("Inventory integrity verified.");
@@ -246,9 +252,20 @@ const App: React.FC = () => {
         } else if (tool.currentHolderName) {
           matchedUser = usersToUse.find(u => u.name.trim().toLowerCase() === tool.currentHolderName?.trim().toLowerCase());
         }
+
+        let updatedTool: Tool = { ...tool };
+        
         if (matchedUser) {
-          const repairedTool: Tool = { ...tool, currentHolderId: matchedUser.id, currentHolderName: matchedUser.name, status: ToolStatus.BOOKED_OUT };
-          await upsertSingleTool(repairedTool);
+          updatedTool = { ...updatedTool, currentHolderId: matchedUser.id, currentHolderName: matchedUser.name, status: ToolStatus.BOOKED_OUT };
+        }
+
+        // Normalize warehouse names
+        if (updatedTool.status === ToolStatus.AVAILABLE && (!updatedTool.currentSite || updatedTool.currentSite === DEFAULT_WAREHOUSE || updatedTool.currentSite === 'Warehouse')) {
+          updatedTool.currentSite = DEFAULT_WAREHOUSE;
+        }
+
+        if (JSON.stringify(updatedTool) !== JSON.stringify(tool)) {
+          await upsertSingleTool(updatedTool);
           repairedCount++;
         }
       }
@@ -369,7 +386,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handleReturnTool = async (comment: string, condition: string, photo?: string) => {
+  const handleReturnTool = async (comment: string, condition: string, site: string, photo?: string) => {
     if (!returningTool || !currentUser) return;
     setIsSyncing(true);
     try {
@@ -389,6 +406,7 @@ const App: React.FC = () => {
         userName: currentUser.name,
         action: 'RETURN',
         timestamp: Date.now(),
+        site: site,
         comment,
         condition,
         photo: finalPhotoUrl
@@ -399,7 +417,7 @@ const App: React.FC = () => {
         status: newStatus,
         currentHolderId: undefined,
         currentHolderName: undefined,
-        currentSite: undefined,
+        currentSite: site,
         bookedAt: undefined,
         lastReturnedAt: Date.now(),
         logs: [newLog, ...(returningTool.logs || [])].slice(0, 50)
@@ -469,8 +487,8 @@ const App: React.FC = () => {
         `"${t.category.replace(/"/g, '""')}"`,
         `"${t.status.replace(/"/g, '""')}"`,
         `"${(t.serialNumber || '').replace(/"/g, '""')}"`,
-        `"${(t.currentHolderName || 'Warehouse').replace(/"/g, '""')}"`,
-        `"${(t.currentSite || 'Warehouse').replace(/"/g, '""')}"`,
+        `"${(t.currentHolderName || DEFAULT_WAREHOUSE).replace(/"/g, '""')}"`,
+        `"${(t.currentSite || DEFAULT_WAREHOUSE).replace(/"/g, '""')}"`,
         t.bookedAt ? `"${new Date(t.bookedAt).toLocaleString()}"` : 'N/A'
       ];
     });
@@ -503,7 +521,8 @@ const App: React.FC = () => {
     let result = tools.filter(t => {
       const matchesSearch = t.name.toLowerCase().includes(searchTerm.toLowerCase()) || (t.currentHolderName || '').toLowerCase().includes(searchTerm.toLowerCase());
       const matchesStatus = statusFilter === 'ALL' || t.status === statusFilter;
-      return matchesSearch && matchesStatus;
+      const matchesWarehouse = warehouseFilter === 'ALL' || (t.currentSite === warehouseFilter);
+      return matchesSearch && matchesStatus && matchesWarehouse;
     });
 
     if (sortOrder === 'ASC') {
@@ -584,22 +603,6 @@ const App: React.FC = () => {
         )}
       </div>
 
-      {/* Connectivity Indicator */}
-      <div className="mb-6 flex justify-between items-center px-2">
-         <div>
-            <h2 className="text-2xl font-black text-neda-navy uppercase tracking-tight">Inventory</h2>
-            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{tools.length} Items Managed</p>
-         </div>
-         <button 
-           onClick={handleManualRefresh}
-           disabled={isSyncing}
-           className={`flex items-center gap-2 px-3 py-1.5 rounded-full border transition-all active:scale-95 ${isSupabaseConnected ? 'bg-green-50 border-green-100 text-green-600' : 'bg-red-50 border-red-100 text-red-600 animate-pulse'}`}
-         >
-            {isSupabaseConnected ? <Wifi size={12} /> : <WifiOff size={12} />}
-            <span className="text-[8px] font-black uppercase tracking-widest">{isSupabaseConnected ? 'Live' : 'Reconnect'}</span>
-         </button>
-      </div>
-
       {showAddUser && <AddUserModal onClose={() => setShowAddUser(false)} onSave={handleAddUser} />}
       {showAddTool && <AddToolModal onClose={() => setShowAddTool(false)} onSave={handleAddTool} />}
       {returningTool && <ReturnToolModal tool={returningTool} onClose={() => setReturningTool(null)} onConfirm={handleReturnTool} />}
@@ -630,6 +633,8 @@ const App: React.FC = () => {
           setSearchTerm={setSearchTerm}
           statusFilter={statusFilter} 
           setStatusFilter={setStatusFilter}
+          warehouseFilter={warehouseFilter}
+          setWarehouseFilter={setWarehouseFilter}
           sortOrder={sortOrder}
           toggleSort={toggleSort}
           showFilters={showFilters}
@@ -638,6 +643,9 @@ const App: React.FC = () => {
           onInitiateBookOut={(t: Tool) => setBookingTool(t)}
           onInitiateReturn={(t: Tool) => setReturningTool(t)}
           onViewDetail={(t: Tool) => setSelectedToolForDetail(t)}
+          isSupabaseConnected={isSupabaseConnected}
+          handleManualRefresh={handleManualRefresh}
+          isSyncing={isSyncing}
         />
       )}
 
@@ -812,6 +820,18 @@ const ToolDetailModal: React.FC<{ tool: Tool; onClose: () => void; onAddLog: (to
                  <span className="text-[10px] font-bold text-slate-400 uppercase">SN: {tool.serialNumber || 'No Serial'}</span>
                  {tool.dateOfPurchase && <span className="text-[10px] font-bold text-slate-300 uppercase">Purchased: {new Date(tool.dateOfPurchase).toLocaleDateString()}</span>}
               </div>
+              {canEdit && tool.status === ToolStatus.AVAILABLE && (
+                <div className="mt-3 flex items-center gap-2">
+                  <MapPin size={12} className="text-slate-300" />
+                  <select 
+                    className="bg-slate-50 border border-slate-100 rounded-lg px-2 py-1 text-[9px] font-black uppercase tracking-widest outline-none text-neda-navy"
+                    value={tool.currentSite || DEFAULT_WAREHOUSE}
+                    onChange={(e) => onUpdateTool({ ...tool, currentSite: e.target.value })}
+                  >
+                    {WAREHOUSES.map(w => <option key={w} value={w}>{w}</option>)}
+                  </select>
+                </div>
+              )}
             </div>
           </div>
           <button onClick={onClose} className="p-3 bg-slate-50 rounded-2xl text-slate-400 hover:text-neda-navy transition-all"><X size={24} /></button>
@@ -907,6 +927,7 @@ const ToolDetailModal: React.FC<{ tool: Tool; onClose: () => void; onAddLog: (to
 const BookOutModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (tool: Tool, siteAddress: string, targetUserId?: string) => void; users: User[]; currentUser: User }> = ({ tool, onClose, onConfirm, users, currentUser }) => {
   const [addressInput, setAddressInput] = useState('');
   const [targetUserId, setTargetUserId] = useState(currentUser.id);
+  const [useWarehouse, setUseWarehouse] = useState(false);
 
   const canAssignOthers = currentUser.role === UserRole.ADMIN || currentUser.role === UserRole.MANAGER;
 
@@ -946,19 +967,58 @@ const BookOutModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (tool
             </div>
           )}
 
-          <div className="space-y-2 relative">
-            <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.1em] pl-1">Site Address</span>
+          <div className="space-y-3 relative">
+            <div className="flex justify-between items-center px-1">
+              <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.1em]">Destination</span>
+            </div>
+            
+            <div className="flex p-1 bg-slate-100 rounded-xl">
+              <button
+                type="button"
+                onClick={() => {
+                  setUseWarehouse(false);
+                  setAddressInput('');
+                }}
+                className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${!useWarehouse ? 'bg-white text-neda-navy shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                Job Site
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setUseWarehouse(true);
+                  setAddressInput(DEFAULT_WAREHOUSE);
+                }}
+                className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${useWarehouse ? 'bg-white text-neda-navy shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                Warehouse
+              </button>
+            </div>
+
             <div className="relative z-[710]">
               <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
-              <input 
-                autoFocus 
-                type="text" 
-                placeholder="Enter job site address..." 
-                className="w-full p-5 pl-12 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm outline-none focus:ring-4 focus:ring-neda-navy/5 transition-all shadow-sm" 
-                value={addressInput} 
-                onChange={(e) => setAddressInput(e.target.value)} 
-                autoComplete="off"
-              />
+              {useWarehouse ? (
+                <>
+                  <select 
+                    className="w-full p-5 pl-12 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm outline-none focus:ring-4 focus:ring-neda-navy/5 appearance-none"
+                    value={addressInput}
+                    onChange={(e) => setAddressInput(e.target.value)}
+                  >
+                    {WAREHOUSES.map(w => <option key={w} value={w}>{w}</option>)}
+                  </select>
+                  <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 pointer-events-none" size={18} />
+                </>
+              ) : (
+                <input 
+                  autoFocus 
+                  type="text" 
+                  placeholder="Enter job site address..." 
+                  className="w-full p-5 pl-12 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm outline-none focus:ring-4 focus:ring-neda-navy/5 transition-all shadow-sm" 
+                  value={addressInput} 
+                  onChange={(e) => setAddressInput(e.target.value)} 
+                  autoComplete="off"
+                />
+              )}
             </div>
           </div>
           <button 
@@ -974,11 +1034,13 @@ const BookOutModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (tool
   );
 };
 
-const ReturnToolModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (comment: string, condition: string, photo?: string) => void }> = ({ tool, onClose, onConfirm }) => {
+const ReturnToolModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (comment: string, condition: string, site: string, photo?: string) => void }> = ({ tool, onClose, onConfirm }) => {
   const [comment, setComment] = useState('');
   const [condition, setCondition] = useState('good');
+  const [warehouse, setWarehouse] = useState(DEFAULT_WAREHOUSE);
   const [photo, setPhoto] = useState<string | undefined>(undefined);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -987,28 +1049,90 @@ const ReturnToolModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (c
       reader.readAsDataURL(file);
     }
   };
+
   return (
     <div className="fixed inset-0 z-[700] bg-neda-navy/95 backdrop-blur-md flex items-center justify-center p-6 animate-in fade-in">
-      <div className="bg-white w-full max-sm rounded-[2.5rem] p-8 shadow-2xl animate-in zoom-in-95">
+      <div className="bg-white w-full max-sm rounded-[2.5rem] p-8 shadow-2xl animate-in zoom-in-95 max-h-[90vh] overflow-y-auto hide-scrollbar">
         <div className="flex justify-between items-center mb-6">
           <div className="flex flex-col">
-            <span className="text-[8px] font-black text-neda-orange uppercase tracking-widest mb-1">Confirm Return</span>
+            <span className="text-[10px] font-black text-neda-orange uppercase tracking-widest mb-1">Confirm Return</span>
             <h2 className="text-xl font-black text-neda-navy uppercase tracking-tight truncate max-w-[200px]">{tool.name}</h2>
           </div>
           <button onClick={onClose} className="p-2 text-slate-300 hover:text-neda-navy"><X size={20} /></button>
         </div>
-        <div className="space-y-5">
-          <select className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-xs outline-none" value={condition} onChange={e => setCondition(e.target.value)}>
-            <option value="good">Good</option>
-            <option value="defect identified">Defect Identified</option>
-            <option value="needs service">Needs Service</option>
-          </select>
-          <textarea className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-xs outline-none min-h-[100px] resize-none" placeholder="Return comments..." value={comment} onChange={e => setComment(e.target.value)} />
-          <div onClick={() => fileInputRef.current?.click()} className="w-full aspect-video bg-slate-50 border-2 border-dashed border-slate-100 rounded-2xl flex flex-col items-center justify-center cursor-pointer overflow-hidden relative">
-            {photo ? <img src={photo} className="w-full h-full object-cover" /> : <><Camera size={24} className="text-slate-200 mb-2" /><span className="text-[9px] font-black text-slate-300 uppercase">Capture photo</span></>}
-            <input type="file" ref={fileInputRef} accept="image/*" capture="environment" className="hidden" onChange={handlePhotoUpload} />
+        
+        <div className="space-y-6">
+          {/* Warehouse Selection */}
+          <div className="space-y-2 relative">
+            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest pl-1">Return To Warehouse</span>
+            <div className="relative z-[710]">
+              <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
+              <select 
+                className="w-full p-5 pl-12 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm outline-none focus:ring-4 focus:ring-neda-navy/5 appearance-none"
+                value={warehouse}
+                onChange={(e) => setWarehouse(e.target.value)}
+              >
+                {WAREHOUSES.map(w => <option key={w} value={w}>{w}</option>)}
+              </select>
+              <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 pointer-events-none" size={18} />
+            </div>
           </div>
-          <button onClick={() => onConfirm(comment, condition, photo)} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-xl">Complete Return</button>
+
+          <div className="space-y-2">
+            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest pl-1">Condition</span>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { id: 'good', label: 'Good' },
+                { id: 'defect identified', label: 'Defect' },
+                { id: 'needs service', label: 'Service' }
+              ].map(c => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => setCondition(c.id)}
+                  className={`p-3 rounded-xl font-bold text-[10px] transition-all border-2 ${
+                    condition === c.id 
+                      ? 'bg-neda-navy text-white border-neda-navy' 
+                      : 'bg-slate-50 text-slate-500 border-slate-100'
+                  }`}
+                >
+                  {c.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest pl-1">Comments</span>
+            <textarea 
+              className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-xs outline-none min-h-[80px] resize-none focus:border-neda-navy/20 transition-all" 
+              placeholder="Any notes about the return..." 
+              value={comment} 
+              onChange={e => setComment(e.target.value)} 
+            />
+          </div>
+
+          <div className="space-y-2">
+            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest pl-1">Photo Evidence (Optional)</span>
+            <div onClick={() => fileInputRef.current?.click()} className="w-full aspect-video bg-slate-50 border-2 border-dashed border-slate-100 rounded-2xl flex flex-col items-center justify-center cursor-pointer overflow-hidden relative group hover:border-neda-navy/20 transition-all">
+              {photo ? (
+                <img src={photo} className="w-full h-full object-cover" />
+              ) : (
+                <>
+                  <Camera size={24} className="text-slate-200 mb-2 group-hover:text-slate-300 transition-all" />
+                  <span className="text-[9px] font-black text-slate-300 uppercase group-hover:text-slate-400">Capture photo</span>
+                </>
+              )}
+              <input type="file" ref={fileInputRef} accept="image/*" capture="environment" className="hidden" onChange={handlePhotoUpload} />
+            </div>
+          </div>
+
+          <button 
+            onClick={() => onConfirm(comment, condition, warehouse, photo)} 
+            className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-xl active:scale-[0.98] transition-all mt-2"
+          >
+            Complete Return
+          </button>
         </div>
       </div>
     </div>
@@ -1037,7 +1161,16 @@ const AddUserModal: React.FC<{ onClose: () => void; onSave: (u: User) => void }>
 };
 
 const AddToolModal: React.FC<{ onClose: () => void; onSave: (t: Tool) => void }> = ({ onClose, onSave }) => {
-  const [formData, setFormData] = useState({ name: '', category: 'Power Tools', serialNumber: '', notes: '', dateOfPurchase: new Date().toISOString().split('T')[0], numberOfItems: 1, mainPhoto: undefined as string | undefined });
+  const [formData, setFormData] = useState({ 
+    name: '', 
+    category: 'Power Tools', 
+    serialNumber: '', 
+    notes: '', 
+    dateOfPurchase: new Date().toISOString().split('T')[0], 
+    numberOfItems: 1, 
+    mainPhoto: undefined as string | undefined,
+    currentSite: DEFAULT_WAREHOUSE
+  });
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1069,13 +1202,22 @@ const AddToolModal: React.FC<{ onClose: () => void; onSave: (t: Tool) => void }>
             <input type="file" ref={fileInputRef} accept="image/*" className="hidden" onChange={handlePhotoUpload} />
           </div>
           <input required className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm" placeholder="Tool Name" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
-          <select className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm" value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})}>
-            <option value="Power Tools">Power Tools</option>
-            <option value="Precision">Precision</option>
-            <option value="Power">Power</option>
-            <option value="Hand Tools">Hand Tools</option>
-            <option value="Asset/Office">Asset/Office</option>
-          </select>
+          <div className="space-y-1">
+            <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest pl-1">Category</span>
+            <select className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm" value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})}>
+              <option value="Power Tools">Power Tools</option>
+              <option value="Precision">Precision</option>
+              <option value="Power">Power</option>
+              <option value="Hand Tools">Hand Tools</option>
+              <option value="Asset/Office">Asset/Office</option>
+            </select>
+          </div>
+          <div className="space-y-1">
+            <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest pl-1">Initial Location</span>
+            <select className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm" value={formData.currentSite} onChange={e => setFormData({...formData, currentSite: e.target.value})}>
+              {WAREHOUSES.map(w => <option key={w} value={w}>{w}</option>)}
+            </select>
+          </div>
           <input className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm" placeholder="Serial Number" value={formData.serialNumber} onChange={e => setFormData({...formData, serialNumber: e.target.value})} />
           <input type="date" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm" value={formData.dateOfPurchase} onChange={e => setFormData({...formData, dateOfPurchase: e.target.value})} />
           <button type="submit" className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg">Register Asset</button>
@@ -1189,8 +1331,23 @@ const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, onBiometricLogi
   );
 };
 
-const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, statusFilter, setStatusFilter, sortOrder, toggleSort, showFilters, setShowFilters, currentUser, onInitiateBookOut, onInitiateReturn, onViewDetail }) => (
+const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, statusFilter, setStatusFilter, warehouseFilter, setWarehouseFilter, sortOrder, toggleSort, showFilters, setShowFilters, currentUser, onInitiateBookOut, onInitiateReturn, onViewDetail, isSupabaseConnected, handleManualRefresh, isSyncing }) => (
   <div className="space-y-6">
+    <div className="flex justify-between items-center px-2">
+       <div>
+          <h2 className="text-2xl font-black text-neda-navy uppercase tracking-tight">Inventory</h2>
+          <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{tools.length} Items Managed</p>
+       </div>
+       <button 
+         onClick={handleManualRefresh}
+         disabled={isSyncing}
+         className={`flex items-center gap-2 px-3 py-1.5 rounded-full border transition-all active:scale-95 ${isSupabaseConnected ? 'bg-green-50 border-green-100 text-green-600' : 'bg-red-50 border-red-100 text-red-600 animate-pulse'}`}
+       >
+          {isSupabaseConnected ? <Wifi size={12} /> : <WifiOff size={12} />}
+          <span className="text-[8px] font-black uppercase tracking-widest">{isSupabaseConnected ? 'Live' : 'Reconnect'}</span>
+       </button>
+    </div>
+
     <div className="relative">
       <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
       <input 
@@ -1216,6 +1373,48 @@ const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, status
         </button>
       </div>
     </div>
+
+    {showFilters && (
+      <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 space-y-4 animate-in slide-in-from-top-2">
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest pl-1">Status</span>
+            <select 
+              className="w-full p-3 bg-white border border-slate-200 rounded-xl font-bold text-[10px] outline-none"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as any)}
+            >
+              <option value="ALL">All Statuses</option>
+              <option value={ToolStatus.AVAILABLE}>Available</option>
+              <option value={ToolStatus.BOOKED_OUT}>Booked Out</option>
+              <option value={ToolStatus.GETTING_SERVICED}>In Repair</option>
+            </select>
+          </div>
+          <div className="space-y-1">
+            <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest pl-1">Location</span>
+            <select 
+              className="w-full p-3 bg-white border border-slate-200 rounded-xl font-bold text-[10px] outline-none"
+              value={warehouseFilter}
+              onChange={(e) => setWarehouseFilter(e.target.value)}
+            >
+              <option value="ALL">All Locations</option>
+              {WAREHOUSES.map(w => <option key={w} value={w}>{w}</option>)}
+            </select>
+          </div>
+        </div>
+        <button 
+          onClick={() => {
+            setStatusFilter('ALL');
+            setWarehouseFilter('ALL');
+            setSearchTerm('');
+            setShowFilters(false);
+          }}
+          className="w-full py-2 text-[8px] font-black text-slate-400 uppercase tracking-widest hover:text-neda-navy transition-colors"
+        >
+          Reset Filters
+        </button>
+      </div>
+    )}
     <div className="bg-white rounded-[2rem] border border-slate-100 overflow-hidden shadow-sm divide-y divide-slate-50">
       {tools.length > 0 ? tools.map((tool: Tool) => {
         const isHeldByMe = tool.status === ToolStatus.BOOKED_OUT && tool.currentHolderId && String(tool.currentHolderId) === String(currentUser.id);
@@ -1239,8 +1438,8 @@ const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, status
                 </div>
                 <h3 className="font-black text-neda-navy text-sm uppercase tracking-tight truncate">{tool.name}</h3>
                 <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5">
-                   <div className="flex items-center gap-1.5 text-slate-400"><UserIcon size={10} /><span className="text-[9px] font-bold uppercase truncate max-w-[90px]">{isAvailable ? 'Warehouse' : (tool.currentHolderName || 'Staff')}</span></div>
-                   <div className="flex items-center gap-1.5 text-slate-400"><MapPin size={10} /><span className="text-[9px] font-bold uppercase truncate max-w-[110px]">{tool.currentSite || 'Warehouse'}</span></div>
+                   <div className="flex items-center gap-1.5 text-slate-400"><UserIcon size={10} /><span className="text-[9px] font-bold uppercase truncate max-w-[90px]">{isAvailable ? (tool.currentSite || DEFAULT_WAREHOUSE) : (tool.currentHolderName || 'Staff')}</span></div>
+                   <div className="flex items-center gap-1.5 text-slate-400"><MapPin size={10} /><span className="text-[9px] font-bold uppercase truncate max-w-[110px]">{tool.currentSite || DEFAULT_WAREHOUSE}</span></div>
                 </div>
               </div>
             </div>
@@ -1257,11 +1456,15 @@ const InventoryView: React.FC<any> = ({ tools, searchTerm, setSearchTerm, status
 const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDeleteUser, onUpdateTool, onShowAddUser, onShowAddTool, onRepairData, onDownloadCSV, userRole, currentUserId, onViewDetail }) => {
   const [activeTab, setActiveTab] = useState<'USERS' | 'STOCKTAKE' | 'ACTIVE_BOOKINGS' | 'HEALTH'>('USERS');
   const [assetSearch, setAssetSearch] = useState('');
+  const [adminWarehouseFilter, setAdminWarehouseFilter] = useState<string | 'ALL'>('ALL');
   const [editingUser, setEditingUser] = useState<User | null>(null);
   
   const bookedTools = useMemo(() => tools.filter((t: Tool) => t.status === ToolStatus.BOOKED_OUT), [tools]);
-  const unhealthyToolsCount = useMemo(() => tools.filter(t => (t.currentHolderName && !t.currentHolderId) || (t.currentHolderId && !t.currentHolderName)).length, [tools]);
-  const filteredAssets = useMemo(() => tools.filter(t => t.name.toLowerCase().includes(assetSearch.toLowerCase())), [tools, assetSearch]);
+  const unhealthyToolsCount = useMemo(() => tools.filter((t: Tool) => (t.currentHolderName && !t.currentHolderId) || (t.currentHolderId && !t.currentHolderName)).length, [tools]);
+  const filteredAssets = useMemo(() => tools.filter((t: Tool) => 
+    t.name.toLowerCase().includes(assetSearch.toLowerCase()) && 
+    (adminWarehouseFilter === 'ALL' || t.currentSite === adminWarehouseFilter)
+  ), [tools, assetSearch, adminWarehouseFilter]);
   
   return (
     <div className="space-y-6">
@@ -1365,11 +1568,21 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
             <button onClick={onShowAddTool} className="p-6 bg-slate-50 border border-dashed border-slate-200 rounded-[2rem] flex flex-col items-center justify-center gap-3"><PlusCircle size={24} className="text-neda-orange" /><h4 className="font-black text-neda-navy text-[8px] uppercase">New Asset</h4></button>
             <button onClick={onDownloadCSV} className="p-6 bg-slate-50 border border-dashed border-slate-200 rounded-[2rem] flex flex-col items-center justify-center gap-3"><FileSpreadsheet size={24} className="text-neda-navy opacity-40" /><h4 className="font-black text-neda-navy text-[8px] uppercase">Export List</h4></button>
           </div>
-          <div className="relative">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-            <input type="text" placeholder="Filter inventory..." className="w-full pl-11 pr-4 py-3 bg-white border border-slate-100 rounded-2xl font-bold text-[10px] outline-none shadow-sm" value={assetSearch} onChange={(e) => setAssetSearch(e.target.value)} />
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+              <input type="text" placeholder="Filter inventory..." className="w-full pl-11 pr-4 py-3 bg-white border border-slate-100 rounded-2xl font-bold text-[10px] outline-none shadow-sm" value={assetSearch} onChange={(e) => setAssetSearch(e.target.value)} />
+            </div>
+            <select 
+              className="bg-white border border-slate-100 rounded-2xl px-3 py-2 text-[10px] font-black uppercase tracking-widest outline-none shadow-sm text-slate-500"
+              value={adminWarehouseFilter}
+              onChange={(e) => setAdminWarehouseFilter(e.target.value)}
+            >
+              <option value="ALL">All Sites</option>
+              {WAREHOUSES.map(w => <option key={w} value={w}>{w}</option>)}
+            </select>
           </div>
-          <div className="grid gap-3">{filteredAssets.map(tool => (
+          <div className="grid gap-3">{filteredAssets.map((tool: Tool) => (
             <div key={tool.id} onClick={() => onViewDetail(tool)} className="bg-white p-5 rounded-[2rem] border border-slate-100 flex items-center justify-between shadow-sm cursor-pointer hover:bg-slate-50 transition-all">
               <div className="flex items-center gap-4 flex-1 min-w-0">
                 <div className="w-10 h-10 rounded-lg bg-slate-50 flex items-center justify-center overflow-hidden border border-slate-100 shrink-0">
@@ -1398,7 +1611,7 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
           {unhealthyToolsCount > 0 && (
             <div className="space-y-2">
               <h4 className="text-[10px] font-black text-red-500 uppercase tracking-widest px-4">Anomalies Detected ({unhealthyToolsCount})</h4>
-              {tools.filter(t => (t.currentHolderName && !t.currentHolderId) || (t.currentHolderId && !t.currentHolderName)).map(t => (
+              {tools.filter((t: Tool) => (t.currentHolderName && !t.currentHolderId) || (t.currentHolderId && !t.currentHolderName)).map((t: Tool) => (
                 <div key={t.id} onClick={() => onViewDetail(t)} className="bg-red-50 p-4 rounded-xl border border-red-100 flex justify-between items-center cursor-pointer">
                   <span className="text-[10px] font-black text-neda-navy uppercase">{t.name}</span>
                   <AlertTriangle size={14} className="text-red-500" />
@@ -1459,7 +1672,7 @@ const MyToolsView: React.FC<any> = ({ tools, currentUser, onInitiateReturn, onVi
             </div>
             <button onClick={(e) => { e.stopPropagation(); onInitiateReturn(tool); }} className="px-5 py-2.5 bg-slate-50 text-neda-orange rounded-xl font-black text-[10px] uppercase border border-neda-orange/10">Return</button>
           </div>
-          <div className="mt-2 pt-4 border-t border-slate-50 flex items-center gap-2"><MapPin size={12} className="text-neda-orange" /><span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest truncate">{tool.currentSite || 'Warehouse'}</span></div>
+          <div className="mt-2 pt-4 border-t border-slate-50 flex items-center gap-2"><MapPin size={12} className="text-neda-orange" /><span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest truncate">{tool.currentSite || DEFAULT_WAREHOUSE}</span></div>
         </div>
       ))}
     </div>

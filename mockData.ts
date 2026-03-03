@@ -1,5 +1,6 @@
 
 import { Tool, ToolStatus, User, UserRole } from './types';
+import { DEFAULT_WAREHOUSE } from './constants';
 
 export const INITIAL_USERS: User[] = [
   { 
@@ -51,6 +52,7 @@ export const INITIAL_TOOLS: Tool[] = [
     category: 'Power Tools',
     serialNumber: 'DW-99122',
     status: ToolStatus.AVAILABLE,
+    currentSite: DEFAULT_WAREHOUSE,
     notes: '',
     logs: []
   },
@@ -73,6 +75,7 @@ export const INITIAL_TOOLS: Tool[] = [
     category: 'Precision',
     serialNumber: 'FS-778',
     status: ToolStatus.AVAILABLE,
+    currentSite: DEFAULT_WAREHOUSE,
     notes: '',
     logs: []
   },
@@ -82,6 +85,7 @@ export const INITIAL_TOOLS: Tool[] = [
     category: 'Power',
     serialNumber: 'HG-2000',
     status: ToolStatus.UNDER_REPAIR,
+    currentSite: DEFAULT_WAREHOUSE,
     notes: '',
     logs: []
   }
