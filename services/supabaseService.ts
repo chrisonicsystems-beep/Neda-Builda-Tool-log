@@ -212,7 +212,7 @@ export const fetchUsersAdminOnly = async (): Promise<{ data: User[] | null; erro
   if (!supabase) return { data: null, error: 'Supabase client not initialized' };
   
   const result = await fetchWithRetry<any[]>(async () => {
-    return await supabase.from('users').select('*');
+    return await supabase.rpc('get_all_users_admin');
   });
 
   if (result.error) {
