@@ -52,51 +52,38 @@ FOR INSERT
 WITH CHECK (auth_uid = auth.uid());
 
 -- Admins can do everything
--- We use a subquery to check if the exact auth.uid() belongs to an admin
+-- We use a SECURITY DEFINER function to bypass RLS and avoid infinite recursion
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS boolean
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.users 
+    WHERE auth_uid = auth.uid() AND role = 'ADMIN' AND is_enabled = true
+  );
+$$;
+
 CREATE POLICY "Admins can view all users" 
 ON public.users 
 FOR SELECT 
-USING (
-  EXISTS (
-    SELECT 1 FROM public.users 
-    WHERE auth_uid = auth.uid() AND role = 'ADMIN' AND is_enabled = true
-  )
-);
+USING (public.is_admin());
 
 CREATE POLICY "Admins can insert all users" 
 ON public.users 
 FOR INSERT 
-WITH CHECK (
-  EXISTS (
-    SELECT 1 FROM public.users 
-    WHERE auth_uid = auth.uid() AND role = 'ADMIN' AND is_enabled = true
-  )
-);
+WITH CHECK (public.is_admin());
 
 CREATE POLICY "Admins can update all users" 
 ON public.users 
 FOR UPDATE 
-USING (
-  EXISTS (
-    SELECT 1 FROM public.users 
-    WHERE auth_uid = auth.uid() AND role = 'ADMIN' AND is_enabled = true
-  )
-)
-WITH CHECK (
-  EXISTS (
-    SELECT 1 FROM public.users 
-    WHERE auth_uid = auth.uid() AND role = 'ADMIN' AND is_enabled = true
-  )
-);
+USING (public.is_admin())
+WITH CHECK (public.is_admin());
 
 CREATE POLICY "Admins can delete all users" 
 ON public.users 
 FOR DELETE 
-USING (
-  EXISTS (
-    SELECT 1 FROM public.users 
-    WHERE auth_uid = auth.uid() AND role = 'ADMIN' AND is_enabled = true
-  )
-);
+USING (public.is_admin());
 
 COMMIT;
