@@ -21,6 +21,7 @@ export interface User {
   password?: string;
   isEnabled: boolean;
   mustChangePassword?: boolean;
+  authUid?: string;
 }
 
 export interface ToolLog {

@@ -44,7 +44,7 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { analyzeTools } from './services/geminiService';
-import { fetchTools, fetchUsers, upsertSingleTool, upsertSingleUser, deleteSingleUser, uploadFile, supabase } from './services/supabaseService';
+import { fetchTools, fetchUsersAdminOnly, upsertSingleTool, upsertSingleUser, deleteSingleUser, uploadFile, supabase, signIn, getSession, signOut, fetchCurrentUserProfile } from './services/supabaseService';
 import { WAREHOUSES, DEFAULT_WAREHOUSE } from './constants';
 
 const TEMP_PASSWORD_PREFIX = "NEDA-RESET-";
@@ -78,13 +78,14 @@ const App: React.FC = () => {
   const [bookingTool, setBookingTool] = useState<Tool | null>(null);
   const [selectedToolForDetail, setSelectedToolForDetail] = useState<Tool | null>(null);
 
-  const loadData = async () => {
+  const loadData = async (userRole?: UserRole) => {
     try {
-      // Fetch in parallel for better performance and to reduce timeout risk
-      const [userResponse, toolResponse] = await Promise.all([
-        fetchUsers(),
-        fetchTools()
-      ]);
+      const toolPromise = fetchTools();
+      const userPromise = (userRole === UserRole.ADMIN || currentUser?.role === UserRole.ADMIN) 
+        ? fetchUsersAdminOnly() 
+        : Promise.resolve({ data: currentUser ? [currentUser] : [], error: null });
+
+      const [userResponse, toolResponse] = await Promise.all([userPromise, toolPromise]);
 
       const userError = userResponse.error;
       const toolError = toolResponse.error;
@@ -118,16 +119,17 @@ const App: React.FC = () => {
         return tool;
       });
 
-      setAllUsers(finalUsers);
-      setTools(finalTools);
-
-      if (currentUser) {
-        const freshUser = finalUsers.find(u => u.email.toLowerCase() === currentUser.email.toLowerCase());
-        if (freshUser) {
-          setCurrentUser(freshUser);
-          localStorage.setItem('et_user', JSON.stringify(freshUser));
-        }
+      // Avoid wiping out existing users if non-admin just loaded their own profile
+      if (userRole === UserRole.ADMIN || currentUser?.role === UserRole.ADMIN) {
+        setAllUsers(finalUsers);
+      } else {
+        setAllUsers(prev => {
+           // ensure the current user is at least in the array
+           return currentUser ? [currentUser] : prev;
+        });
       }
+      
+      setTools(finalTools);
 
       return { finalUsers, finalTools };
     } catch (err: any) {
@@ -140,8 +142,24 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const init = async () => {
-      const result = await loadData();
-      if (result) {
+      let roleToPass: UserRole | undefined = undefined;
+      const session = await getSession();
+      if (session?.user?.id) {
+        // Logged in with Supabase
+        const profileResponse = await fetchCurrentUserProfile(session.user.id);
+        if (profileResponse.data && profileResponse.data.isEnabled) {
+          setCurrentUser(profileResponse.data);
+          roleToPass = profileResponse.data.role;
+        } else {
+          // Profile not enabled or not found, sign out automatically
+          await signOut();
+        }
+      }
+
+      const result = await loadData(roleToPass);
+      if (result && !session?.user?.id) {
+        // Fallback for biometric / memory if needed, but since we rely on Supabase session mostly 
+        // we can still support legacy cached data if needed.
         const savedUserStr = localStorage.getItem('et_user');
         if (savedUserStr) {
           const savedUser = JSON.parse(savedUserStr);
@@ -231,7 +249,7 @@ const App: React.FC = () => {
     setIsSyncing(true);
     let repairedCount = 0;
     try {
-      const [uRes, tRes] = await Promise.all([fetchUsers(), fetchTools()]);
+      const [uRes, tRes] = await Promise.all([(currentUser?.role === UserRole.ADMIN ? fetchUsersAdminOnly() : Promise.resolve({ data: [currentUser as User], error: null })), fetchTools()]);
       const usersToUse = uRes.data || INITIAL_USERS;
       const toolsToFix = (tRes.data || []).filter(tool => 
         (tool.currentHolderName && !tool.currentHolderId) || 
@@ -281,24 +299,16 @@ const App: React.FC = () => {
 
   const handleLogin = async (user: User, remember: boolean) => {
     setIsSyncing(true);
-    const result = await loadData();
-    let finalUser = user;
-    if (result) {
-      const freshUser = result.finalUsers.find(u => u.email.toLowerCase() === user.email.toLowerCase());
-      if (freshUser) {
-        finalUser = freshUser;
-      }
-    }
-
-    if (finalUser.password?.startsWith(TEMP_PASSWORD_PREFIX)) finalUser.mustChangePassword = true;
-    setCurrentUser(finalUser);
-    if (remember) localStorage.setItem('et_user', JSON.stringify(finalUser));
+    setCurrentUser(user);
+    if (remember) localStorage.setItem('et_user', JSON.stringify(user));
+    await loadData(user.role);
     setIsSyncing(false);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     setCurrentUser(null);
     localStorage.removeItem('et_user');
+    await signOut();
     setView('INVENTORY');
   };
 
@@ -1275,13 +1285,33 @@ const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, onBiometricLogi
   const [forgotEmail, setForgotEmail] = useState('');
   const [tempPassResult, setTempPassResult] = useState<string | null>(null);
   const [isResetting, setIsResetting] = useState(false);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
-    const user = users.find((u: User) => u.email.toLowerCase() === email.trim().toLowerCase());
-    if (user && user.password === password) {
-      await onLogin(user, rememberMe);
-    } else {
-      setError('Invalid Credentials.');
+    setIsLoggingIn(true);
+    setError('');
+    try {
+      const { data: userProfile, error: signInError } = await signIn(email.trim(), password);
+      
+      if (signInError || !userProfile) {
+        // Fallback for biometric / legacy users without auth_uid
+        // Note: Production environments should migrate all users to Supabase Auth.
+        // We do a final fallback here to not lock anyone out if they haven't migrated completely.
+        const legacyUser = users.find((u: User) => u.email.toLowerCase() === email.trim().toLowerCase());
+        if (legacyUser && legacyUser.password === password) {
+          // Temporarily allow local-only login without auth_uid
+          await onLogin(legacyUser, rememberMe);
+        } else {
+          setError(signInError?.message || 'Invalid Credentials.');
+        }
+      } else if (userProfile) {
+        await onLogin(userProfile, rememberMe);
+      }
+    } catch (err: any) {
+      setError(err.message || 'An unexpected error occurred during sign in.');
+    } finally {
+      setIsLoggingIn(false);
     }
   };
   return (
@@ -1296,7 +1326,9 @@ const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, onBiometricLogi
             <label className="flex items-center gap-2"><input type="checkbox" checked={rememberMe} onChange={e => setRememberMe(e.target.checked)} className="w-4 h-4 rounded text-neda-navy" /><span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Remember</span></label>
             <button type="button" onClick={() => setShowForgotModal(true)} className="text-neda-orange text-[10px] font-black uppercase tracking-widest">Forgot Key?</button>
           </div>
-          <button type="submit" className="w-full bg-neda-navy text-white py-6 rounded-2xl font-black text-xl uppercase shadow-xl">Sign In</button>
+          <button type="submit" disabled={isLoggingIn} className="w-full bg-neda-navy text-white py-6 rounded-2xl font-black text-xl uppercase shadow-xl disabled:opacity-50">
+            {isLoggingIn ? <Loader2 className="animate-spin mx-auto w-7 h-7" /> : "Sign In"}
+          </button>
           {isBiometricSupported && hasLinkedBiometrics && (
             <button type="button" onClick={onBiometricLogin} className="w-full flex items-center justify-center gap-3 py-5 bg-white border-2 border-neda-navy/10 rounded-2xl text-neda-navy font-black uppercase text-xs tracking-widest">
               <Fingerprint size={20} className="text-neda-orange" /> Biometric

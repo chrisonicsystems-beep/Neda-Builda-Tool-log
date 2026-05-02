@@ -93,7 +93,7 @@ const mapUserToDb = (user: User) => {
     name: user.name,
     role: user.role,
     email: user.email,
-    password: user.password,
+    auth_uid: user.authUid,
     is_enabled: user.isEnabled
   };
 
@@ -109,7 +109,8 @@ const mapDbToUser = (dbUser: any): User => ({
   name: dbUser.name || 'Unknown User',
   role: dbUser.role || 'USER',
   email: dbUser.email || '',
-  password: dbUser.password || 'password123',
+  authUid: dbUser.auth_uid || undefined,
+  // password intentionally kept optional/undefined as it shouldn't persist or load from DB reliably going forward
   isEnabled: dbUser.is_enabled !== undefined ? dbUser.is_enabled : (dbUser.isEnabled !== undefined ? dbUser.isEnabled : true),
   mustChangePassword: dbUser.must_change_password || dbUser.mustChangePassword || false
 });
@@ -207,19 +208,66 @@ export const fetchTools = async (): Promise<{ data: Tool[] | null; error: any }>
   return { data: (result.data || []).map(mapDbToTool), error: null };
 };
 
-export const fetchUsers = async (): Promise<{ data: User[] | null; error: any }> => {
+export const fetchUsersAdminOnly = async (): Promise<{ data: User[] | null; error: any }> => {
   if (!supabase) return { data: null, error: 'Supabase client not initialized' };
   
-  // Fix: Explicitly type fetchWithRetry to any[] to avoid 'unknown' mapping errors
   const result = await fetchWithRetry<any[]>(async () => {
     return await supabase.from('users').select('*');
   });
 
   if (result.error) {
-    console.error("Supabase Fetch Users Error:", result.error);
+    console.error("Supabase Fetch Users Admin Error:", result.error);
     return { data: null, error: result.error };
   }
-  return { data: (result.data || []).map(dbUser => mapDbToUser(dbUser)), error: null };
+  return { data: (result.data || []).map(mapDbToUser), error: null };
+};
+
+export const getSession = async () => {
+  if (!supabase) return null;
+  const { data, error } = await supabase.auth.getSession();
+  if (error) throw error;
+  return data.session;
+};
+
+export const signOut = async () => {
+  if (!supabase) return;
+  await supabase.auth.signOut();
+};
+
+export const signIn = async (email: string, password: string): Promise<{ data: User | null; error: any }> => {
+  if (!supabase) return { data: null, error: 'Supabase client not initialized' };
+  
+  const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+    email,
+    password
+  });
+  
+  if (authError || !authData.user) {
+    return { data: null, error: authError || new Error("Failed to authenticate") };
+  }
+  
+  return fetchCurrentUserProfile(authData.user.id);
+};
+
+export const fetchCurrentUserProfile = async (authUid: string): Promise<{ data: User | null; error: any }> => {
+  if (!supabase) return { data: null, error: 'Supabase client not initialized' };
+  
+  const result = await fetchWithRetry<any>(async () => {
+    const res = await supabase.from('users').select('*').eq('auth_uid', authUid).maybeSingle();
+    return res as any;
+  });
+  
+  if (result.error) return { data: null, error: result.error };
+  if (!result.data) return { data: null, error: new Error("Profile not found") };
+  
+  return { data: mapDbToUser(result.data), error: null };
+};
+
+export const upsertCurrentUserProfile = async (user: User) => {
+  if (!supabase) return;
+  const fullData = mapUserToDb(user);
+  const { error } = await supabase.from('users').upsert(fullData, { onConflict: 'auth_uid' });
+  if (error) throw error;
 };
 
 export const syncTools = async (tools: Tool[]) => {
