@@ -172,7 +172,7 @@ const App: React.FC = () => {
       
       // Listen for password recovery
       if (supabase) {
-        supabase.auth.onAuthStateChanged(async (event, session) => {
+        supabase.auth.onAuthStateChange(async (event, session) => {
           if (event === 'PASSWORD_RECOVERY') {
             const profileResponse = await fetchCurrentUserProfile(session!.user.id);
             if (profileResponse.data && profileResponse.data.isEnabled) {
