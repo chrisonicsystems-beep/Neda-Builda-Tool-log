@@ -236,14 +236,39 @@ export const signOut = async () => {
 };
 
 export const signIn = async (email: string, password: string): Promise<{ data: User | null; error: any }> => {
-  if (!supabase) return { data: null, error: 'Supabase client not initialized' };
+  if (!supabase) return { data: null, error: new Error('Supabase client not initialized') };
   
-  const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+  let { data: authData, error: authError } = await supabase.auth.signInWithPassword({
     email,
     password
   });
   
-  if (authError || !authData.user) {
+  // Auto-migrate legacy users who don't have a Supabase Auth account yet
+  if (authError && authError.message.toLowerCase().includes('invalid login credentials')) {
+    const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+      email,
+      password
+    });
+
+    if (signUpData?.user && !signUpError) {
+      // We successfully created a new Supabase Auth user. Now link it!
+      const { data: migrateData } = await supabase.rpc('migrate_legacy_user', {
+        p_email: email,
+        p_password: password,
+        p_auth_uid: signUpData.user.id
+      });
+
+      if (migrateData) {
+        if (!signUpData.session) {
+          return { data: null, error: new Error("Account migrated successfully, but you must confirm your email before logging in. Please check your inbox.") };
+        }
+        authData = signUpData;
+        authError = null;
+      }
+    }
+  }
+
+  if (authError || !authData?.user) {
     return { data: null, error: authError || new Error("Failed to authenticate") };
   }
   

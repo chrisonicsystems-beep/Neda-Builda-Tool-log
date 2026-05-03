@@ -328,8 +328,12 @@ const App: React.FC = () => {
     setIsSyncing(true);
     try {
       if (updatedUser.password && updatedUser.password.length > 0 && updatedUser.password !== currentUser?.password) {
-        const { error: authError } = await updateAuthPassword(updatedUser.password);
-        if (authError) throw authError;
+        if (updatedUser.id === currentUser?.id) {
+          const { error: authError } = await updateAuthPassword(updatedUser.password);
+          if (authError) throw authError;
+        } else {
+          throw new Error("You cannot change another user's authentication password.");
+        }
       }
       await upsertSingleUser(updatedUser);
       setAllUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
@@ -752,21 +756,23 @@ const EditUserModal: React.FC<{ user: User; onClose: () => void; onSave: (u: Use
               <option value={UserRole.ADMIN}>Admin</option>
             </select>
           </div>
-          <div className="space-y-1">
-            <span className="text-[8px] font-black text-slate-400 uppercase tracking-[0.2em] pl-1">Access Password</span>
-            <div className="relative">
-              <input 
-                required 
-                type={showPass ? "text" : "password"} 
-                className="w-full p-4 pr-12 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm" 
-                value={formData.password} 
-                onChange={e => setFormData({...formData, password: e.target.value})} 
-              />
-              <button type="button" onClick={() => setShowPass(!showPass)} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400">
-                {showPass ? <EyeOff size={18} /> : <Eye size={18} />}
-              </button>
+          {isCurrentUser && (
+            <div className="space-y-1">
+              <span className="text-[8px] font-black text-slate-400 uppercase tracking-[0.2em] pl-1">Access Password</span>
+              <div className="relative">
+                <input 
+                  required 
+                  type={showPass ? "text" : "password"} 
+                  className="w-full p-4 pr-12 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm" 
+                  value={formData.password} 
+                  onChange={e => setFormData({...formData, password: e.target.value})} 
+                />
+                <button type="button" onClick={() => setShowPass(!showPass)} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400">
+                  {showPass ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
             </div>
-          </div>
+          )}
           <button type="submit" className="w-full mt-4 py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all">Save Changes</button>
         </form>
       </div>
