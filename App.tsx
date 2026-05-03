@@ -44,7 +44,7 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { analyzeTools } from './services/geminiService';
-import { fetchTools, fetchUsersAdminOnly, upsertSingleTool, upsertSingleUser, deleteSingleUser, uploadFile, supabase, signIn, getSession, signOut, fetchCurrentUserProfile } from './services/supabaseService';
+import { fetchTools, fetchUsersAdminOnly, upsertSingleTool, upsertSingleUser, deleteSingleUser, uploadFile, supabase, signIn, getSession, signOut, fetchCurrentUserProfile, resetPasswordForEmail, updateAuthPassword } from './services/supabaseService';
 import { WAREHOUSES, DEFAULT_WAREHOUSE } from './constants';
 
 const TEMP_PASSWORD_PREFIX = "NEDA-RESET-";
@@ -170,6 +170,18 @@ const App: React.FC = () => {
         }
       }
       
+      // Listen for password recovery
+      if (supabase) {
+        supabase.auth.onAuthStateChanged(async (event, session) => {
+          if (event === 'PASSWORD_RECOVERY') {
+            const profileResponse = await fetchCurrentUserProfile(session!.user.id);
+            if (profileResponse.data && profileResponse.data.isEnabled) {
+              setCurrentUser({ ...profileResponse.data, mustChangePassword: true });
+            }
+          }
+        });
+      }
+
       if (window.PublicKeyCredential) {
         const available = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
         setIsBiometricSupported(available);
@@ -315,6 +327,10 @@ const App: React.FC = () => {
   const updateUser = async (updatedUser: User) => {
     setIsSyncing(true);
     try {
+      if (updatedUser.password && updatedUser.password.length > 0 && updatedUser.password !== currentUser?.password) {
+        const { error: authError } = await updateAuthPassword(updatedUser.password);
+        if (authError) throw authError;
+      }
       await upsertSingleUser(updatedUser);
       setAllUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
       if (currentUser?.id === updatedUser.id) {
@@ -518,13 +534,11 @@ const App: React.FC = () => {
   };
 
   const handleForgotPassword = async (email: string): Promise<string> => {
-    const user = allUsers.find(u => u.email.toLowerCase() === email.trim().toLowerCase());
-    if (!user) throw new Error(`Staff email not found.`);
-    const tempPass = TEMP_PASSWORD_PREFIX + Math.floor(10000000 + Math.random() * 90000000);
-    const updatedUser = { ...user, password: tempPass, mustChangePassword: true };
-    await upsertSingleUser(updatedUser);
-    setAllUsers(prev => prev.map(u => u.id === user.id ? updatedUser : u));
-    return tempPass;
+    const { error } = await resetPasswordForEmail(email.trim().toLowerCase());
+    if (error) {
+      throw new Error(error.message || `Failed to send reset email.`);
+    }
+    return "SENT";
   };
 
   const filteredTools = useMemo(() => {
@@ -1342,8 +1356,8 @@ const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, onBiometricLogi
             {tempPassResult ? (
               <div className="animate-in zoom-in-95">
                 <div className="bg-green-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6"><Key size={32} className="text-green-600" /></div>
-                <h2 className="text-xl font-black text-neda-navy uppercase mb-2">Access Restored</h2>
-                <div className="bg-slate-50 p-6 rounded-2xl border-2 border-dashed border-slate-200 mb-8"><p className="text-base font-mono font-black text-neda-navy">{tempPassResult}</p></div>
+                <h2 className="text-xl font-black text-neda-navy uppercase mb-2">Email Sent</h2>
+                <div className="mb-8"><p className="text-xs font-bold text-slate-400">A password recovery link has been sent to your email.</p></div>
                 <button onClick={() => setShowForgotModal(false)} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg">Done</button>
               </div>
             ) : (

@@ -2,15 +2,16 @@
 import { createClient } from '@supabase/supabase-js';
 import { Tool, User, ToolStatus } from '../types';
 
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || import.meta.env.VITE_Supabase_URL || (typeof process !== 'undefined' && process?.env?.SUPABASE_URL);
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_Supabase_Anon_Key || (typeof process !== 'undefined' && process?.env?.SUPABASE_ANON_KEY);
 
 export const supabase = (supabaseUrl && supabaseAnonKey && supabaseUrl !== '' && supabaseAnonKey !== '') 
   ? createClient(supabaseUrl, supabaseAnonKey) 
   : null;
 
 if (!supabase) {
-  console.warn("Supabase Client: Missing Credentials.");
+  console.warn("Supabase Client: Missing Credentials. Please check your environment variables (VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY).");
+  console.log("Current VITE_SUPABASE_URL:", !!supabaseUrl);
 }
 
 const cleanPayload = (obj: any) => {
@@ -261,6 +262,22 @@ export const fetchCurrentUserProfile = async (authUid: string): Promise<{ data: 
   if (!result.data) return { data: null, error: new Error("Profile not found") };
   
   return { data: mapDbToUser(result.data), error: null };
+};
+
+export const resetPasswordForEmail = async (email: string) => {
+  if (!supabase) return { error: new Error('Supabase client not initialized') };
+  // You can point this to the specific URL where they reset. Since we don't have a dedicated path, we point to the root.
+  // The app will open, and they'll be logged in, so they should be prompted to reset their password if we handle it.
+  const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: window.location.origin
+  });
+  return { data, error };
+};
+
+export const updateAuthPassword = async (newPassword: string) => {
+  if (!supabase) return { error: new Error('Supabase client not initialized') };
+  const { data, error } = await supabase.auth.updateUser({ password: newPassword });
+  return { data, error };
 };
 
 export const upsertCurrentUserProfile = async (user: User) => {
