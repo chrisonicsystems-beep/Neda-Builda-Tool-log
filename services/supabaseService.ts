@@ -226,7 +226,11 @@ export const fetchUsersAdminOnly = async (): Promise<{ data: User[] | null; erro
 export const getSession = async () => {
   if (!supabase) return null;
   const { data, error } = await supabase.auth.getSession();
-  if (error) throw error;
+  if (error) {
+    console.warn("Supabase Session Error:", error.message);
+    await supabase.auth.signOut();
+    return null;
+  }
   return data.session;
 };
 
