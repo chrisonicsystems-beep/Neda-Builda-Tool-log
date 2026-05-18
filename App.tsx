@@ -146,10 +146,23 @@ const App: React.FC = () => {
     let authSub: any;
 
     if (supabase) {
-      const { data } = supabase.auth.onAuthStateChange((event) => {
+      const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
         if (event === 'PASSWORD_RECOVERY') {
           isRecovering = true;
           setCurrentUser(prev => prev ? { ...prev, mustChangePassword: true } : prev);
+        }
+        
+        if (session?.user?.id && (event === 'SIGNED_IN' || event === 'PASSWORD_RECOVERY')) {
+          const profileResponse = await fetchCurrentUserProfile(session.user.id);
+          if (profileResponse.data && profileResponse.data.isEnabled) {
+             setCurrentUser(prev => {
+                // If we already have the user, just update it, otherwise set it fresh
+                if (prev) {
+                   return { ...prev, mustChangePassword: event === 'PASSWORD_RECOVERY' || prev.mustChangePassword };
+                }
+                return { ...profileResponse.data, mustChangePassword: isRecovering || event === 'PASSWORD_RECOVERY' || profileResponse.data.mustChangePassword };
+             });
+          }
         }
       });
       authSub = data.subscription;
