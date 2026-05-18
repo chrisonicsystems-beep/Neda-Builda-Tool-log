@@ -760,7 +760,24 @@ const EditUserModal: React.FC<{ user: User; onClose: () => void; onSave: (u: Use
               <option value={UserRole.ADMIN}>Admin</option>
             </select>
           </div>
-          {isCurrentUser && (
+          {(!user.authUid) ? (
+            <div className="space-y-1">
+              <span className="text-[8px] font-black text-slate-400 uppercase tracking-[0.2em] pl-1">Legacy Password (Not Migrated)</span>
+              <div className="relative">
+                <input 
+                  required 
+                  type={showPass ? "text" : "password"} 
+                  className="w-full p-4 pr-12 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm bg-orange-50/50" 
+                  value={formData.password} 
+                  onChange={e => setFormData({...formData, password: e.target.value})} 
+                />
+                <button type="button" onClick={() => setShowPass(!showPass)} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400">
+                  {showPass ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
+              <p className="text-[9px] font-bold text-slate-400 px-1 pt-1">User will be auto-migrated upon next login.</p>
+            </div>
+          ) : isCurrentUser ? (
             <div className="space-y-1">
               <span className="text-[8px] font-black text-slate-400 uppercase tracking-[0.2em] pl-1">Access Password</span>
               <div className="relative">
@@ -775,6 +792,13 @@ const EditUserModal: React.FC<{ user: User; onClose: () => void; onSave: (u: Use
                   {showPass ? <EyeOff size={18} /> : <Eye size={18} />}
                 </button>
               </div>
+            </div>
+          ) : (
+            <div className="space-y-1">
+               <span className="text-[8px] font-black text-slate-400 uppercase tracking-[0.2em] pl-1">Security</span>
+               <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase">Migrated Account</span>
+               </div>
             </div>
           )}
           <button type="submit" className="w-full mt-4 py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all">Save Changes</button>
@@ -1366,8 +1390,11 @@ const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, onBiometricLogi
             {tempPassResult ? (
               <div className="animate-in zoom-in-95">
                 <div className="bg-green-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6"><Key size={32} className="text-green-600" /></div>
-                <h2 className="text-xl font-black text-neda-navy uppercase mb-2">Email Sent</h2>
-                <div className="mb-8"><p className="text-xs font-bold text-slate-400">A password recovery link has been sent to your email.</p></div>
+                <h2 className="text-xl font-black text-neda-navy uppercase mb-2">Check Email</h2>
+                <div className="mb-8 space-y-3">
+                  <p className="text-xs font-bold text-slate-500">If your account is migrated, a recovery link has been sent.</p>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-neda-orange px-2">Not migrated yet? Ask your Administrator to reset your password so you can sign in.</p>
+                </div>
                 <button onClick={() => setShowForgotModal(false)} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg">Done</button>
               </div>
             ) : (

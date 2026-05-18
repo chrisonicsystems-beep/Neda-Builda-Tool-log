@@ -295,11 +295,7 @@ export const fetchCurrentUserProfile = async (authUid: string): Promise<{ data: 
 
 export const resetPasswordForEmail = async (email: string) => {
   if (!supabase) return { error: new Error('Supabase client not initialized') };
-  // You can point this to the specific URL where they reset. Since we don't have a dedicated path, we point to the root.
-  // The app will open, and they'll be logged in, so they should be prompted to reset their password if we handle it.
-  const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: window.location.origin
-  });
+  const { data, error } = await supabase.auth.resetPasswordForEmail(email);
   return { data, error };
 };
 
