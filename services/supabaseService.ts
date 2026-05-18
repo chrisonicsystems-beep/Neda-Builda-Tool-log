@@ -313,7 +313,24 @@ export const fetchCurrentUserProfile = async (sessionUser: any): Promise<{ data:
           await supabase.from('users').update({ auth_uid: authUid }).eq('id', emailRes.data.id);
           res = emailRes;
        } else {
-          res = emailRes;
+          // AUTO-PROVISIONING for valid authenticated users missing from public.users
+          console.log(`Auto-provisioning public profile for ${email}...`);
+          const newId = 'U' + Date.now();
+          const { data: insertData, error: insertError } = await supabase.from('users').insert({
+              id: newId,
+              name: email.split('@')[0],
+              role: 'USER',
+              email: email,
+              auth_uid: authUid,
+              is_enabled: true,
+              must_change_password: true
+          }).select('*').single();
+          
+          if (insertData && !insertError) {
+             res = { data: insertData, error: null };
+          } else {
+             res = emailRes;
+          }
        }
     }
     

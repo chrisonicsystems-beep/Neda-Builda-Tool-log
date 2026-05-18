@@ -176,6 +176,13 @@ const App: React.FC = () => {
       try {
         let roleToPass: UserRole | undefined = undefined;
         const session = await getSession();
+        
+        // Robust check for password recovery hash since race conditions can happen
+        const hasRecoveryHash = window.location.hash.includes('type=recovery');
+        if (hasRecoveryHash) {
+          isRecovering = true;
+        }
+        
         if (session?.user?.id) {
           // Logged in with Supabase
           const profileResponse = await fetchCurrentUserProfile(session.user);
@@ -185,7 +192,7 @@ const App: React.FC = () => {
           } else {
             // Profile not enabled or not found, sign out automatically
             console.error("Init: Profile invalid or not found", profileResponse);
-            if (profileResponse.error) setSyncError("Failed to load profile data...");
+            if (profileResponse.error) setSyncError("Your account could not be found or is disabled.");
             await signOut();
           }
         }
@@ -608,14 +615,25 @@ const App: React.FC = () => {
   );
 
   if (!currentUser) return (
-    <LoginScreen 
-      onLogin={handleLogin} 
-      onForgotPassword={handleForgotPassword} 
-      onBiometricLogin={handleBiometricLogin}
-      users={allUsers} 
-      isBiometricSupported={isBiometricSupported} 
-      hasLinkedBiometrics={hasLinkedBiometrics}
-    />
+    <>
+      <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[100] w-full max-w-xs px-4 pointer-events-none">
+        {syncError && (
+          <div className="bg-red-500 text-white px-4 py-3 rounded-2xl shadow-xl flex items-center gap-3 animate-in slide-in-from-top-4 pointer-events-auto">
+            <AlertTriangle size={18} className="shrink-0" />
+            <span className="text-[10px] font-black uppercase tracking-widest flex-1">{syncError}</span>
+            <button onClick={() => setSyncError(null)} className="p-1"><X size={12}/></button>
+          </div>
+        )}
+      </div>
+      <LoginScreen 
+        onLogin={handleLogin} 
+        onForgotPassword={handleForgotPassword} 
+        onBiometricLogin={handleBiometricLogin}
+        users={allUsers} 
+        isBiometricSupported={isBiometricSupported} 
+        hasLinkedBiometrics={hasLinkedBiometrics}
+      />
+    </>
   );
 
   const toggleSort = () => {
