@@ -95,12 +95,12 @@ const App: React.FC = () => {
 
       if (userError || toolError) {
         const errorMsg = toolError?.message || userError?.message || 'Database connection failure';
-        const isTimeout = errorMsg.toLowerCase().includes('timeout') || errorMsg.includes('57014');
+        const isTimeout = errorMsg.toLowerCase().includes('timeout') || errorMsg.toLowerCase().includes('timed out') || errorMsg.includes('57014');
         setSyncError(isTimeout ? `Network Delay: Request Timed Out` : `Supabase Error: ${errorMsg}`);
         setIsSupabaseConnected(false);
       } else {
         setIsSupabaseConnected(true);
-        setSyncError(null);
+        setSyncError(prev => (prev?.startsWith("Your account") || prev?.startsWith("Temporary password")) ? prev : null);
       }
 
       let finalUsers = (remoteUsers !== null) ? remoteUsers : INITIAL_USERS;
