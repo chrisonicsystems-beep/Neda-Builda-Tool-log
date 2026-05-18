@@ -142,52 +142,56 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const init = async () => {
-      let roleToPass: UserRole | undefined = undefined;
-      const session = await getSession();
-      if (session?.user?.id) {
-        // Logged in with Supabase
-        const profileResponse = await fetchCurrentUserProfile(session.user.id);
-        if (profileResponse.data && profileResponse.data.isEnabled) {
-          setCurrentUser(profileResponse.data);
-          roleToPass = profileResponse.data.role;
-        } else {
-          // Profile not enabled or not found, sign out automatically
-          await signOut();
-        }
-      }
-
-      const result = await loadData(roleToPass);
-      if (result && !session?.user?.id) {
-        // Fallback for biometric / memory if needed, but since we rely on Supabase session mostly 
-        // we can still support legacy cached data if needed.
-        const savedUserStr = localStorage.getItem('et_user');
-        if (savedUserStr) {
-          const savedUser = JSON.parse(savedUserStr);
-          const freshUser = result.finalUsers.find(u => u.email.toLowerCase() === savedUser.email.toLowerCase());
-          if (freshUser) {
-            setCurrentUser(freshUser);
+      try {
+        let roleToPass: UserRole | undefined = undefined;
+        const session = await getSession();
+        if (session?.user?.id) {
+          // Logged in with Supabase
+          const profileResponse = await fetchCurrentUserProfile(session.user.id);
+          if (profileResponse.data && profileResponse.data.isEnabled) {
+            setCurrentUser(profileResponse.data);
+            roleToPass = profileResponse.data.role;
+          } else {
+            // Profile not enabled or not found, sign out automatically
+            await signOut();
           }
         }
-      }
-      
-      // Listen for password recovery
-      if (supabase) {
-        supabase.auth.onAuthStateChange(async (event, session) => {
-          if (event === 'PASSWORD_RECOVERY') {
-            const profileResponse = await fetchCurrentUserProfile(session!.user.id);
-            if (profileResponse.data && profileResponse.data.isEnabled) {
-              setCurrentUser({ ...profileResponse.data, mustChangePassword: true });
+
+        const result = await loadData(roleToPass);
+        if (result && !session?.user?.id) {
+          // Fallback for biometric / memory if needed
+          const savedUserStr = localStorage.getItem('et_user');
+          if (savedUserStr) {
+            const savedUser = JSON.parse(savedUserStr);
+            const freshUser = result.finalUsers.find(u => u.email.toLowerCase() === savedUser.email.toLowerCase());
+            if (freshUser) {
+              setCurrentUser(freshUser);
             }
           }
-        });
-      }
+        }
+        
+        // Listen for password recovery
+        if (supabase) {
+          supabase.auth.onAuthStateChange(async (event, session) => {
+            if (event === 'PASSWORD_RECOVERY') {
+              const profileResponse = await fetchCurrentUserProfile(session!.user.id);
+              if (profileResponse.data && profileResponse.data.isEnabled) {
+                setCurrentUser({ ...profileResponse.data, mustChangePassword: true });
+              }
+            }
+          });
+        }
 
-      if (window.PublicKeyCredential) {
-        const available = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
-        setIsBiometricSupported(available);
-        setHasLinkedBiometrics(!!localStorage.getItem(BIOMETRIC_KEY));
+        if (window.PublicKeyCredential) {
+          const available = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+          setIsBiometricSupported(available);
+          setHasLinkedBiometrics(!!localStorage.getItem(BIOMETRIC_KEY));
+        }
+      } catch (err) {
+        console.error("Initialization error:", err);
+      } finally {
+        setIsInitializing(false);
       }
-      setIsInitializing(false);
     };
     init();
   }, []);

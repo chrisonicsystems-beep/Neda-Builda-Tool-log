@@ -228,7 +228,7 @@ export const getSession = async () => {
   const { data, error } = await supabase.auth.getSession();
   if (error) {
     console.warn("Supabase Session Error:", error.message);
-    await supabase.auth.signOut();
+    try { await supabase.auth.signOut(); } catch (e) { /* ignore */ }
     return null;
   }
   return data.session;
@@ -236,7 +236,7 @@ export const getSession = async () => {
 
 export const signOut = async () => {
   if (!supabase) return;
-  await supabase.auth.signOut();
+  try { await supabase.auth.signOut(); } catch (e) { /* ignore */ }
 };
 
 export const signIn = async (email: string, password: string): Promise<{ data: User | null; error: any }> => {
@@ -266,7 +266,7 @@ export const signIn = async (email: string, password: string): Promise<{ data: U
         if (!signUpData.session) {
           return { data: null, error: new Error("Account migrated successfully, but you must confirm your email before logging in. Please check your inbox.") };
         }
-        authData = signUpData;
+        authData = signUpData as any;
         authError = null;
       }
     }
