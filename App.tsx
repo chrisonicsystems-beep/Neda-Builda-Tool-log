@@ -41,7 +41,8 @@ import {
   Plus,
   Wifi,
   WifiOff,
-  RefreshCw
+  RefreshCw,
+  Info
 } from 'lucide-react';
 import { analyzeTools } from './services/geminiService';
 import { fetchTools, fetchUsersAdminOnly, upsertSingleTool, upsertSingleUser, deleteSingleUser, uploadFile, supabase, signIn, getSession, signOut, fetchCurrentUserProfile, resetPasswordForEmail, updateAuthPassword } from './services/supabaseService';
@@ -1211,6 +1212,13 @@ const AddUserModal: React.FC<{ onClose: () => void; onSave: (u: User) => void }>
             <option value={UserRole.MANAGER}>Manager</option>
             <option value={UserRole.ADMIN}>Admin</option>
           </select>
+          <div className="p-4 bg-slate-50 border border-slate-100 rounded-2xl flex items-start gap-3">
+            <Info size={16} className="text-neda-orange shrink-0 mt-0.5" />
+            <p className="text-[10px] font-bold text-slate-500 leading-relaxed tracking-wide">
+              <span className="uppercase">NEW STAFF ARE GIVEN THE DEFAULT ACCESS KEY:</span> <span className="font-black text-neda-navy">password123</span><br />
+              <span className="uppercase">THEY WILL BE REQUIRED TO CHANGE IT ON THEIR FIRST LOGIN.</span>
+            </p>
+          </div>
           <button type="submit" className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg">Create Profile</button>
         </form>
       </div>
