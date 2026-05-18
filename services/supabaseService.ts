@@ -2,26 +2,16 @@
 import { createClient } from '@supabase/supabase-js';
 import { Tool, User, ToolStatus } from '../types';
 
-// Bypass navigator.locks in iframes (like the preview) where it can hang indefinitely due to cross-origin restrictions
-if (typeof window !== 'undefined' && window.parent !== window) {
-  try {
-    const nav = window.navigator as any;
-    if (nav.locks) {
-      nav.locks.request = async (name: any, optionsOrCb: any, cb?: any) => {
-        const callback = typeof optionsOrCb === 'function' ? optionsOrCb : cb;
-        return await callback();
-      };
-    }
-  } catch (e) {
-    console.warn("Could not patch navigator.locks", e);
-  }
-}
+// Bypass navigator.locks in iframes (like the preview) where it can hang indefinitely
+const dummyLock = async (name: string, acquireTimeout: number, fn: () => Promise<any>) => {
+  return await fn();
+};
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || import.meta.env.VITE_Supabase_URL || (typeof process !== 'undefined' && process?.env?.SUPABASE_URL);
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_Supabase_Anon_Key || (typeof process !== 'undefined' && process?.env?.SUPABASE_ANON_KEY);
 
 export const supabase = (supabaseUrl && supabaseAnonKey && supabaseUrl !== '' && supabaseAnonKey !== '') 
-  ? createClient(supabaseUrl, supabaseAnonKey) 
+  ? createClient(supabaseUrl, supabaseAnonKey, { auth: { lock: dummyLock } }) 
   : null;
 
 if (!supabase) {
@@ -57,14 +47,14 @@ const fetchWithRetry = async <T>(
       const isTimeout = lastError?.code === '57014' || lastError?.message?.includes('timeout') || lastError?.message?.includes('timed out');
       if (isTimeout) {
         console.warn(`Statement timeout detected, retrying (${i + 1}/${retries})...`);
-        await new Promise(resolve => setTimeout(resolve, delay * (i + 1) * 2));
+        await new Promise(resolve => setTimeout(() => resolve(null), delay * (i + 1) * 2));
       } else {
-        await new Promise(resolve => setTimeout(resolve, delay * (i + 1)));
+        await new Promise(resolve => setTimeout(() => resolve(null), delay * (i + 1)));
       }
     } catch (err) {
       console.warn("fetchWithRetry uncaught error:", err);
       lastError = err;
-      await new Promise(resolve => setTimeout(resolve, delay * (i + 1)));
+      await new Promise(resolve => setTimeout(() => resolve(null), delay * (i + 1)));
     }
   }
   return { data: null, error: lastError };

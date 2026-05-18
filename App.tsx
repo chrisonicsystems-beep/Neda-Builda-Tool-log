@@ -1231,7 +1231,7 @@ const ReturnToolModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (c
 };
 
 const AddUserModal: React.FC<{ onClose: () => void; onSave: (u: User) => void }> = ({ onClose, onSave }) => {
-  const [formData, setFormData] = useState({ name: '', email: '', password: 'password123', role: UserRole.USER });
+  const [formData, setFormData] = useState({ name: '', email: '', password: 'Password123', role: UserRole.USER });
   return (
     <div className="fixed inset-0 z-[700] bg-neda-navy/95 backdrop-blur-md flex items-center justify-center p-6 animate-in fade-in">
       <div className="bg-white w-full max-sm rounded-[2.5rem] p-8 shadow-2xl">
@@ -1247,8 +1247,8 @@ const AddUserModal: React.FC<{ onClose: () => void; onSave: (u: User) => void }>
           <div className="p-4 bg-slate-50 border border-slate-100 rounded-2xl flex items-start gap-3">
             <Info size={16} className="text-neda-orange shrink-0 mt-0.5" />
             <p className="text-[10px] font-bold text-slate-500 leading-relaxed tracking-wide">
-              <span className="uppercase">NEW STAFF ARE GIVEN THE DEFAULT ACCESS KEY:</span> <span className="font-black text-neda-navy">password123</span><br />
-              <span className="uppercase">THEY WILL BE REQUIRED TO CHANGE IT ON THEIR FIRST LOGIN.</span>
+              <span className="uppercase">NEW STAFF ARE GIVEN THE DEFAULT ACCESS KEY:</span> <span className="font-black text-neda-navy">Password123</span><br />
+              <span className="uppercase text-slate-400">Passwords are case-sensitive. They will be required to change it on their first login.</span>
             </p>
           </div>
           <button type="submit" className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg">Create Profile</button>
@@ -1325,18 +1325,30 @@ const AddToolModal: React.FC<{ onClose: () => void; onSave: (t: Tool) => void }>
   );
 };
 
-const MandatoryPasswordChange: React.FC<{ user: User; onUpdate: (u: User) => void }> = ({ user, onUpdate }) => {
+const MandatoryPasswordChange: React.FC<{ user: User; onUpdate: (u: User) => Promise<void> }> = ({ user, onUpdate }) => {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [isDone, setIsDone] = useState(false);
-  const handleSubmit = (e: React.FormEvent) => {
+  const [isUpdating, setIsUpdating] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (newPassword.length < 6) { setError("Min 6 characters."); return; }
     if (newPassword !== confirmPassword) { setError("Keys do not match."); return; }
-    setIsDone(true);
-    onUpdate({ ...user, password: newPassword, mustChangePassword: false });
+    
+    setIsUpdating(true);
+    setError('');
+    try {
+      await onUpdate({ ...user, password: newPassword, mustChangePassword: false });
+      setIsDone(true);
+    } catch (err: any) {
+      setError(err.message || "Failed to update profile.");
+    } finally {
+      setIsUpdating(false);
+    }
   };
+
   return (
     <div className="fixed inset-0 z-[500] bg-neda-navy flex items-center justify-center p-6 animate-in fade-in">
       <div className="bg-white w-full max-sm rounded-[3rem] p-10 shadow-2xl text-center">
@@ -1352,10 +1364,13 @@ const MandatoryPasswordChange: React.FC<{ user: User; onUpdate: (u: User) => voi
             <h2 className="text-xl font-black text-neda-navy uppercase mb-2">Secure Your Profile</h2>
             <p className="text-[10px] font-bold text-slate-400 uppercase mb-8 tracking-widest">Update your access key</p>
             <form onSubmit={handleSubmit} className="space-y-4">
-              <input type="password" placeholder="New Password" required className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm text-center" value={newPassword} onChange={e => setNewPassword(e.target.value)} />
-              <input type="password" placeholder="Confirm Key" required className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm text-center" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} />
+              <input type="password" placeholder="New Password" required className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm text-center" value={newPassword} onChange={e => setNewPassword(e.target.value)} disabled={isUpdating} />
+              <input type="password" placeholder="Confirm Key" required className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm text-center" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} disabled={isUpdating} />
               {error && <p className="text-red-500 text-[9px] font-black uppercase tracking-widest">{error}</p>}
-              <button type="submit" className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg">Activate Key</button>
+              <button type="submit" disabled={isUpdating} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg flex items-center justify-center gap-2">
+                {isUpdating && <Loader2 size={16} className="animate-spin" />}
+                {isUpdating ? 'Activating...' : 'Activate Key'}
+              </button>
             </form>
           </>
         )}
