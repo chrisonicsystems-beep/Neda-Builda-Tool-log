@@ -276,14 +276,33 @@ export const signIn = async (email: string, password: string): Promise<{ data: U
     return { data: null, error: authError || new Error("Failed to authenticate") };
   }
   
-  return fetchCurrentUserProfile(authData.user.id);
+  return fetchCurrentUserProfile(authData.user);
 };
 
-export const fetchCurrentUserProfile = async (authUid: string): Promise<{ data: User | null; error: any }> => {
+export const fetchCurrentUserProfile = async (sessionUser: any): Promise<{ data: User | null; error: any }> => {
   if (!supabase) return { data: null, error: 'Supabase client not initialized' };
   
+  const authUid = sessionUser.id;
+  const email = sessionUser.email?.toLowerCase();
+
   const result = await fetchWithRetry<any>(async () => {
-    const res = await supabase.from('users').select('*').eq('auth_uid', authUid).maybeSingle();
+    let res = await supabase.from('users').select('*').eq('auth_uid', authUid).maybeSingle();
+    
+    // Fallback: If not found by auth_uid, try finding by email
+    if (!res.data && email) {
+       console.warn(`Profile not found for auth_uid ${authUid}. Falling back to email lookup for ${email}.`);
+       const emailRes = await supabase.from('users').select('*').ilike('email', email).maybeSingle();
+       
+       if (emailRes.data && !emailRes.error) {
+          // Found by email. Let's auto-fix the auth_uid for future logins!
+          console.log(`Found profile by email, fixing auth_uid in database to ${authUid}...`);
+          await supabase.from('users').update({ auth_uid: authUid }).eq('id', emailRes.data.id);
+          res = emailRes;
+       } else {
+          res = emailRes;
+       }
+    }
+    
     return res as any;
   });
   

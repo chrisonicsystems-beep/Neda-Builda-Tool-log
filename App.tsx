@@ -153,7 +153,7 @@ const App: React.FC = () => {
         }
         
         if (session?.user?.id && (event === 'SIGNED_IN' || event === 'PASSWORD_RECOVERY')) {
-          const profileResponse = await fetchCurrentUserProfile(session.user.id);
+          const profileResponse = await fetchCurrentUserProfile(session.user);
           if (profileResponse.data && profileResponse.data.isEnabled) {
              setCurrentUser(prev => {
                 // If we already have the user, just update it, otherwise set it fresh
@@ -162,6 +162,10 @@ const App: React.FC = () => {
                 }
                 return { ...profileResponse.data, mustChangePassword: isRecovering || event === 'PASSWORD_RECOVERY' || profileResponse.data.mustChangePassword };
              });
+          } else {
+             console.error("Auth state change: Profile invalid or not found", profileResponse.error);
+             setSyncError("Your account could not be found or is disabled.");
+             await signOut();
           }
         }
       });
@@ -174,12 +178,14 @@ const App: React.FC = () => {
         const session = await getSession();
         if (session?.user?.id) {
           // Logged in with Supabase
-          const profileResponse = await fetchCurrentUserProfile(session.user.id);
+          const profileResponse = await fetchCurrentUserProfile(session.user);
           if (profileResponse.data && profileResponse.data.isEnabled) {
             setCurrentUser({ ...profileResponse.data, mustChangePassword: isRecovering || profileResponse.data.mustChangePassword });
             roleToPass = profileResponse.data.role;
           } else {
             // Profile not enabled or not found, sign out automatically
+            console.error("Init: Profile invalid or not found", profileResponse);
+            if (profileResponse.error) setSyncError("Failed to load profile data...");
             await signOut();
           }
         }
@@ -197,10 +203,17 @@ const App: React.FC = () => {
           }
         }
         
-        if (window.PublicKeyCredential) {
-          const available = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
-          setIsBiometricSupported(available);
-          setHasLinkedBiometrics(!!localStorage.getItem(BIOMETRIC_KEY));
+        if (window.PublicKeyCredential && typeof window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable === 'function') {
+          try {
+            const available = await Promise.race([
+              PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable(),
+              new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 2000))
+            ]);
+            setIsBiometricSupported(available);
+            setHasLinkedBiometrics(!!localStorage.getItem(BIOMETRIC_KEY));
+          } catch (e) {
+             console.warn("Biometric check failed or timed out", e);
+          }
         }
       } catch (err) {
         console.error("Initialization error:", err);
