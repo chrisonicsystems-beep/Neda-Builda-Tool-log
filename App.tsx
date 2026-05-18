@@ -142,6 +142,19 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
+    let isRecovering = false;
+    let authSub: any;
+
+    if (supabase) {
+      const { data } = supabase.auth.onAuthStateChange((event) => {
+        if (event === 'PASSWORD_RECOVERY') {
+          isRecovering = true;
+          setCurrentUser(prev => prev ? { ...prev, mustChangePassword: true } : prev);
+        }
+      });
+      authSub = data.subscription;
+    }
+
     const init = async () => {
       try {
         let roleToPass: UserRole | undefined = undefined;
@@ -150,7 +163,7 @@ const App: React.FC = () => {
           // Logged in with Supabase
           const profileResponse = await fetchCurrentUserProfile(session.user.id);
           if (profileResponse.data && profileResponse.data.isEnabled) {
-            setCurrentUser(profileResponse.data);
+            setCurrentUser({ ...profileResponse.data, mustChangePassword: isRecovering || profileResponse.data.mustChangePassword });
             roleToPass = profileResponse.data.role;
           } else {
             // Profile not enabled or not found, sign out automatically
@@ -171,18 +184,6 @@ const App: React.FC = () => {
           }
         }
         
-        // Listen for password recovery
-        if (supabase) {
-          supabase.auth.onAuthStateChange(async (event, session) => {
-            if (event === 'PASSWORD_RECOVERY') {
-              const profileResponse = await fetchCurrentUserProfile(session!.user.id);
-              if (profileResponse.data && profileResponse.data.isEnabled) {
-                setCurrentUser({ ...profileResponse.data, mustChangePassword: true });
-              }
-            }
-          });
-        }
-
         if (window.PublicKeyCredential) {
           const available = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
           setIsBiometricSupported(available);
@@ -194,7 +195,12 @@ const App: React.FC = () => {
         setIsInitializing(false);
       }
     };
+
     init();
+
+    return () => {
+      if (authSub) authSub.unsubscribe();
+    };
   }, []);
 
   const handleManualRefresh = async () => {
