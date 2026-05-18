@@ -6,7 +6,30 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || import.meta.env.VITE_Su
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_Supabase_Anon_Key || (typeof process !== 'undefined' && process?.env?.SUPABASE_ANON_KEY);
 
 export const supabase = (supabaseUrl && supabaseAnonKey && supabaseUrl !== '' && supabaseAnonKey !== '') 
-  ? createClient(supabaseUrl, supabaseAnonKey) 
+  ? createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        lock: (name, acquire) => {
+          // Bypass navigator.locks in iframes (like the preview) where it can hang indefinitely
+          if (typeof window !== 'undefined') {
+            return new Promise((resolve, reject) => {
+              let isDone = false;
+              acquire().then(
+                res => { isDone = true; resolve(res); },
+                err => { isDone = true; reject(err); }
+              );
+              // Fallback timeout in case acquire itself hangs
+              setTimeout(() => {
+                if (!isDone) {
+                  console.warn('Supabase auth lock timed out, proceeding anyway.');
+                  resolve(null as any);
+                }
+              }, 3000);
+            });
+          }
+          return acquire();
+        }
+      }
+    }) 
   : null;
 
 if (!supabase) {
@@ -225,7 +248,12 @@ export const fetchUsersAdminOnly = async (): Promise<{ data: User[] | null; erro
 
 export const getSession = async () => {
   if (!supabase) return null;
-  const { data, error } = await supabase.auth.getSession();
+  // Use Promise.race to prevent indefinite hanging in preview iframe
+  const { data, error } = await Promise.race([
+    supabase.auth.getSession(),
+    new Promise<any>((resolve) => setTimeout(() => resolve({ data: { session: null }, error: new Error("Session check timed out") }), 4000))
+  ]);
+  
   if (error) {
     console.warn("Supabase Session Error:", error.message);
     try { await supabase.auth.signOut(); } catch (e) { /* ignore */ }
