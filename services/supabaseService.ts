@@ -2,34 +2,26 @@
 import { createClient } from '@supabase/supabase-js';
 import { Tool, User, ToolStatus } from '../types';
 
+// Bypass navigator.locks in iframes (like the preview) where it can hang indefinitely due to cross-origin restrictions
+if (typeof window !== 'undefined' && window.parent !== window) {
+  try {
+    const nav = window.navigator as any;
+    if (nav.locks) {
+      nav.locks.request = async (name: any, optionsOrCb: any, cb?: any) => {
+        const callback = typeof optionsOrCb === 'function' ? optionsOrCb : cb;
+        return await callback();
+      };
+    }
+  } catch (e) {
+    console.warn("Could not patch navigator.locks", e);
+  }
+}
+
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || import.meta.env.VITE_Supabase_URL || (typeof process !== 'undefined' && process?.env?.SUPABASE_URL);
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_Supabase_Anon_Key || (typeof process !== 'undefined' && process?.env?.SUPABASE_ANON_KEY);
 
 export const supabase = (supabaseUrl && supabaseAnonKey && supabaseUrl !== '' && supabaseAnonKey !== '') 
-  ? createClient(supabaseUrl, supabaseAnonKey, {
-      auth: {
-        lock: (name, acquire) => {
-          // Bypass navigator.locks in iframes (like the preview) where it can hang indefinitely
-          if (typeof window !== 'undefined') {
-            return new Promise((resolve, reject) => {
-              let isDone = false;
-              acquire().then(
-                res => { isDone = true; resolve(res); },
-                err => { isDone = true; reject(err); }
-              );
-              // Fallback timeout in case acquire itself hangs
-              setTimeout(() => {
-                if (!isDone) {
-                  console.warn('Supabase auth lock timed out, proceeding anyway.');
-                  resolve(null as any);
-                }
-              }, 3000);
-            });
-          }
-          return acquire();
-        }
-      }
-    }) 
+  ? createClient(supabaseUrl, supabaseAnonKey) 
   : null;
 
 if (!supabase) {
@@ -54,12 +46,15 @@ const fetchWithRetry = async <T>(
   let lastError: any;
   for (let i = 0; i < retries; i++) {
     try {
-      const result = await fetchFn();
-      if (!result.error) return result;
+      const result = await Promise.race([
+        fetchFn(),
+        new Promise<any>((_, reject) => setTimeout(() => reject(new Error("Request timed out (preventing iframe hang)")), 6000))
+      ]);
+      if (!result?.error) return result;
       lastError = result.error;
       
       // If it's a statement timeout (57014), wait a bit longer before retry
-      const isTimeout = lastError?.code === '57014' || lastError?.message?.includes('timeout');
+      const isTimeout = lastError?.code === '57014' || lastError?.message?.includes('timeout') || lastError?.message?.includes('timed out');
       if (isTimeout) {
         console.warn(`Statement timeout detected, retrying (${i + 1}/${retries})...`);
         await new Promise(resolve => setTimeout(resolve, delay * (i + 1) * 2));
@@ -67,6 +62,7 @@ const fetchWithRetry = async <T>(
         await new Promise(resolve => setTimeout(resolve, delay * (i + 1)));
       }
     } catch (err) {
+      console.warn("fetchWithRetry uncaught error:", err);
       lastError = err;
       await new Promise(resolve => setTimeout(resolve, delay * (i + 1)));
     }
@@ -270,10 +266,10 @@ export const signOut = async () => {
 export const signIn = async (email: string, password: string): Promise<{ data: User | null; error: any }> => {
   if (!supabase) return { data: null, error: new Error('Supabase client not initialized') };
   
-  let { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-    email,
-    password
-  });
+  let { data: authData, error: authError } = await Promise.race([
+    supabase.auth.signInWithPassword({ email, password }),
+    new Promise<any>((resolve) => setTimeout(() => resolve({ data: null, error: new Error('Request timed out (preventing iframe hang)') }), 8000))
+  ]);
   
   // Auto-migrate legacy users who don't have a Supabase Auth account yet
   if (authError && authError.message.toLowerCase().includes('invalid login credentials')) {
