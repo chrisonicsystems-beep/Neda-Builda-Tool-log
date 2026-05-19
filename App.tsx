@@ -162,10 +162,13 @@ const App: React.FC = () => {
                 }
                 return { ...profileResponse.data, mustChangePassword: isRecovering || event === 'PASSWORD_RECOVERY' || profileResponse.data.mustChangePassword };
              });
-          } else {
+          } else if (!profileResponse.error || (profileResponse.data && !profileResponse.data.isEnabled)) {
              console.error("Auth state change: Profile invalid or not found", profileResponse.error);
              setSyncError("Your account could not be found or is disabled.");
              await signOut();
+          } else {
+             console.error("Auth state change: Network error fetching profile", profileResponse.error);
+             setSyncError("Network error: Could not verify account status.");
           }
         }
       });
@@ -189,11 +192,14 @@ const App: React.FC = () => {
           if (profileResponse.data && profileResponse.data.isEnabled) {
             setCurrentUser({ ...profileResponse.data, mustChangePassword: isRecovering || profileResponse.data.mustChangePassword });
             roleToPass = profileResponse.data.role;
-          } else {
+          } else if (!profileResponse.error || (profileResponse.data && !profileResponse.data.isEnabled)) {
             // Profile not enabled or not found, sign out automatically
             console.error("Init: Profile invalid or not found", profileResponse);
-            if (profileResponse.error) setSyncError("Your account could not be found or is disabled.");
+            setSyncError("Your account could not be found or is disabled.");
             await signOut();
+          } else {
+            console.error("Init: Network error fetching profile", profileResponse.error);
+            setSyncError("Network error: Could not verify account status.");
           }
         }
 

@@ -2,9 +2,21 @@
 import { createClient } from '@supabase/supabase-js';
 import { Tool, User, ToolStatus } from '../types';
 
-// Bypass navigator.locks in iframes (like the preview) where it can hang indefinitely
+// Memory lock to bypass navigator.locks in iframes without causing race conditions
+const memoryLocks = new Map<string, Promise<void>>();
 const dummyLock = async (name: string, acquireTimeout: number, fn: () => Promise<any>) => {
-  return await fn();
+  while (memoryLocks.has(name)) {
+    await memoryLocks.get(name);
+  }
+  let release: () => void;
+  const promise = new Promise<void>((r) => { release = r; });
+  memoryLocks.set(name, promise);
+  try {
+    return await fn();
+  } finally {
+    memoryLocks.delete(name);
+    release!();
+  }
 };
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || import.meta.env.VITE_Supabase_URL || (typeof process !== 'undefined' && process?.env?.SUPABASE_URL);
@@ -38,7 +50,7 @@ const fetchWithRetry = async <T>(
     try {
       const result = await Promise.race([
         fetchFn(),
-        new Promise<any>((_, reject) => setTimeout(() => reject(new Error("Request timed out (preventing iframe hang)")), 60000))
+        new Promise<any>((_, reject) => setTimeout(() => reject(new Error("Request timed out (preventing iframe hang)")), 15000))
       ]);
       if (!result?.error) return result;
       lastError = result.error;
@@ -237,7 +249,7 @@ export const getSession = async () => {
   // Use Promise.race to prevent indefinite hanging in preview iframe
   const { data, error } = await Promise.race([
     supabase.auth.getSession(),
-    new Promise<any>((resolve) => setTimeout(() => resolve({ data: { session: null }, error: new Error("Session check timed out") }), 60000))
+    new Promise<any>((resolve) => setTimeout(() => resolve({ data: { session: null }, error: new Error("Session check timed out") }), 15000))
   ]);
   
   if (error) {
@@ -258,7 +270,7 @@ export const signIn = async (email: string, password: string): Promise<{ data: U
   
   let { data: authData, error: authError } = await Promise.race([
     supabase.auth.signInWithPassword({ email, password }),
-    new Promise<any>((resolve) => setTimeout(() => resolve({ data: null, error: new Error('Request timed out (preventing iframe hang)') }), 60000))
+    new Promise<any>((resolve) => setTimeout(() => resolve({ data: null, error: new Error('Request timed out (preventing iframe hang)') }), 15000))
   ]);
   
   // Auto-migrate legacy users who don't have a Supabase Auth account yet
