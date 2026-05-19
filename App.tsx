@@ -1364,8 +1364,14 @@ const MandatoryPasswordChange: React.FC<{ user: User; onUpdate: (u: User) => Pro
     setIsUpdating(true);
     setError('');
     try {
-      await onUpdate({ ...user, password: newPassword, mustChangePassword: false });
       setIsDone(true);
+      // Wait for 2 seconds to show the success message
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Clear the recovery hash from the URL so page refreshes don't trigger it again
+      if (window.location.hash.includes('type=recovery')) {
+        window.history.replaceState(null, document.title, window.location.pathname + window.location.search);
+      }
+      await onUpdate({ ...user, password: newPassword, mustChangePassword: false });
     } catch (err: any) {
       setError(err.message || "Failed to update profile.");
     } finally {
