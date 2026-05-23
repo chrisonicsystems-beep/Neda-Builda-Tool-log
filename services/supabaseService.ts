@@ -224,86 +224,21 @@ export const upsertSingleUser = async (user: User) => {
 export const onboardNewStaff = async (user: User) => {
   if (!supabase) return;
   
-  console.log("Onboarding new staff via direct fetch API...", user.email);
-  
-  // 1. Create user in auth.users using raw fetch to absolutely prevent session contamination
-  let newAuthUid: string | undefined = undefined;
-  try {
-    const res = await fetch(`${supabaseUrl}/auth/v1/signup`, {
-      method: 'POST',
-      headers: {
-        'apikey': supabaseAnonKey,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        email: user.email,
-        password: user.password || 'Password123'
-      })
-    });
-    const data = await res.json();
-    console.log("Raw signup response:", data);
-    
-    const errMessage = data.message || data.msg || data.error_description || (typeof data.error === 'string' ? data.error : '');
-    
-    // If it fails with something other than already registered, we abort
-    if (!res.ok) {
-        if (!errMessage || !errMessage.toLowerCase().includes('already registered')) {
-            throw new Error(errMessage || `Signup failed with status ${res.status}`);
-        }
-    }
-    
-    // GoTrue signup returns either a User object directly or a Session object wrapper
-    if (data.user?.id) {
-        newAuthUid = data.user.id;
-    } else if (data.id) {
-        newAuthUid = data.id;
-    }
-  } catch (err: any) {
-     if (err.message && !err.message.includes('already registered')) {
-        throw new Error(`Failed to create Auth account: ${err.message}`);
+  console.log("Onboarding new staff via SQL Direct RPC API...", user.email);
+
+  const { data, error } = await supabase.rpc('admin_create_staff', {
+    new_email: user.email.toLowerCase().trim(),
+    new_password: user.password || 'Password123',
+    new_name: user.name,
+    new_role: user.role,
+    new_id: user.id
+  });
+
+  if (error) {
+     if (error.message.includes('find the function') || error.message.includes('function admin_create_staff') || error.message.includes('function "admin_create_staff"')) {
+        throw new Error('DB_MIGRATION_REQUIRED');
      }
-  }
-
-  // 2. Insert into public.users with the new auth_uid (if available)
-  const fullData = mapUserToDb(user);
-  if (newAuthUid) {
-    fullData.auth_uid = newAuthUid;
-  }
-
-  let currentSession: any;
-  try {
-    const sessionRes = await supabase.auth.getSession();
-    currentSession = sessionRes.data;
-    console.log("Session right before upsert:", currentSession?.session?.user?.email);
-    
-    const { error: rpcError } = await supabase.rpc('upsert_user_admin', { user_data: fullData });
-
-    if (rpcError && (rpcError.message.includes('find the function') || rpcError.message.includes('function upsert_user_admin'))) {
-      const { error: insertError } = await supabase
-        .from('users')
-        .upsert(fullData, { onConflict: 'id' });
-
-      if (insertError) {
-        if (insertError.message.includes('must_change_password')) {
-          const { must_change_password, ...safeData } = fullData;
-          const { error: retryError } = await supabase
-            .from('users')
-            .upsert(safeData, { onConflict: 'id' });
-          if (retryError) throw retryError;
-        } else {
-          throw insertError;
-        }
-      }
-    } else if (rpcError) {
-      throw rpcError;
-    }
-  } catch (err: any) {
-    console.error("Supabase Onboard User Critical Error:", err);
-    if (err.message && err.message.toLowerCase().includes('violates row-level security policy')) {
-       try { await supabase.auth.refreshSession(); } catch(e) {}
-       throw new Error(`DB_MIGRATION_REQUIRED`);
-    }
-    throw new Error(`Database Sync Error: ${err.message}`);
+     throw new Error(`RPC Failed: ${error.message}`);
   }
 };
 

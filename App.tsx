@@ -111,6 +111,12 @@ const App: React.FC = () => {
 
       let finalUsers = (remoteUsers !== null) ? remoteUsers : INITIAL_USERS;
       let finalTools = (remoteTools !== null) ? remoteTools : INITIAL_TOOLS;
+      
+      if ((userRole === UserRole.ADMIN || currentUser?.role === UserRole.ADMIN) && finalUsers && finalUsers.length > 0) {
+        if (finalUsers.some(u => !u.authUid)) {
+           setShowDbFixModal(true);
+        }
+      }
 
       finalTools = finalTools.map(tool => {
         if (tool.currentHolderId && !tool.currentHolderName) {
@@ -1298,67 +1304,90 @@ const ReturnToolModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (c
 const DatabaseFixModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const [copied, setCopied] = useState(false);
   
-  const sqlCommand = `-- 0. Release any stagnant locks from previous failed runs!
-ROLLBACK;
+  const sqlCommand = `BEGIN;
 
--- 1. Auto-Link Admin Accounts that are missing their auth_uid
-UPDATE public.users u
-SET auth_uid = a.id
-FROM auth.users a
-WHERE u.email = a.email
-  AND u.role = 'ADMIN'
-  AND (u.auth_uid IS NULL OR u.auth_uid != a.id);
+-- 1. Ensure required setup
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT false;
 
--- 2. Drop existing function to ensure a fresh replacement
+-- 2. Drop any previous upsert functions to ensure a fresh replacement
 DROP FUNCTION IF EXISTS public.upsert_user_admin(jsonb);
+DROP FUNCTION IF EXISTS public.admin_create_staff(text, text, text, text, text);
 
--- 3. Create the RPC for Admins to Upsert Users safely
-CREATE OR REPLACE FUNCTION public.upsert_user_admin(user_data jsonb)
-RETURNS boolean
+-- 3. Create a reliable RPC for Admins to create Auth accounts directly!
+CREATE OR REPLACE FUNCTION public.admin_create_staff(
+  new_email text, 
+  new_password text, 
+  new_name text, 
+  new_role text,
+  new_id text
+)
+RETURNS uuid
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-  v_auth_uid uuid;
+  v_user_id uuid;
+  v_encrypted_password text;
 BEGIN
-  IF EXISTS (
+  -- 1. Check if caller is admin
+  IF NOT EXISTS (
     SELECT 1 FROM public.users 
     WHERE auth_uid = auth.uid() AND role = 'ADMIN' AND is_enabled = true
   ) THEN
-    v_auth_uid := CAST(NULLIF(user_data->>'auth_uid', '') AS uuid);
-    IF v_auth_uid IS NULL THEN
-      SELECT id INTO v_auth_uid FROM auth.users WHERE email = user_data->>'email' LIMIT 1;
-    END IF;
-
-    INSERT INTO public.users (id, email, name, role, is_enabled, auth_uid)
-    VALUES (
-      user_data->>'id',
-      user_data->>'email',
-      user_data->>'name',
-      user_data->>'role',
-      COALESCE((user_data->>'is_enabled')::boolean, true),
-      v_auth_uid
-    )
-    ON CONFLICT (id) DO UPDATE SET
-      email = EXCLUDED.email,
-      name = EXCLUDED.name,
-      role = EXCLUDED.role,
-      is_enabled = EXCLUDED.is_enabled,
-      auth_uid = COALESCE(v_auth_uid, public.users.auth_uid);
-    RETURN true;
-  ELSE
-    RAISE EXCEPTION 'Access denied. You must be an ADMIN.';
+    RAISE EXCEPTION 'Access denied. You must be an ADMIN to create new staff.';
   END IF;
+
+  -- 2. Check if auth user already exists
+  SELECT id INTO v_user_id FROM auth.users WHERE email = new_email LIMIT 1;
+
+  IF v_user_id IS NULL THEN
+    -- User doesn't exist, create them
+    v_user_id := gen_random_uuid();
+    v_encrypted_password := extensions.crypt(new_password, extensions.gen_salt('bf'));
+
+    INSERT INTO auth.users (
+      id, instance_id, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at, role, confirmation_token, email_change, email_change_token_new, recovery_token
+    ) VALUES (
+      v_user_id, '00000000-0000-0000-0000-000000000000', new_email, v_encrypted_password, now(), '{"provider":"email","providers":["email"]}', '{}', now(), now(), 'authenticated', '', '', '', ''
+    );
+
+    INSERT INTO auth.identities (
+       id, user_id, identity_data, provider, last_sign_in_at, created_at, updated_at
+    ) VALUES (
+       gen_random_uuid(), v_user_id, format('{"sub":"%s"}', v_user_id)::jsonb, 'email', now(), now(), now()
+    );
+  ELSE
+    -- ALWAYS override the password to the requested one if the account already exists, 
+    -- so that "Password123" (or whatever they set) is guaranteed to work!
+    UPDATE auth.users 
+    SET encrypted_password = extensions.crypt(new_password, extensions.gen_salt('bf'))
+    WHERE id = v_user_id;
+  END IF;
+
+  -- 4. Upsert into public.users
+  INSERT INTO public.users (id, email, name, role, is_enabled, auth_uid, must_change_password)
+  VALUES (
+    new_id, new_email, new_name, new_role, true, v_user_id, true
+  )
+  ON CONFLICT (id) DO UPDATE SET
+    email = EXCLUDED.email,
+    name = EXCLUDED.name,
+    role = EXCLUDED.role,
+    auth_uid = v_user_id;
+
+  RETURN v_user_id;
 END;
 $$;
 
 -- 4. Correctly set the owner to bypass RLS internally
-ALTER FUNCTION public.upsert_user_admin(jsonb) OWNER TO postgres;
+ALTER FUNCTION public.admin_create_staff(text, text, text, text, text) OWNER TO postgres;
 
 -- 5. Hard flush the schema cache so the frontend can see the function
 NOTIFY pgrst, 'reload schema';
-`;
+
+COMMIT;`;
 
   const copyToClipboard = () => {
     navigator.clipboard.writeText(sqlCommand);
@@ -1384,7 +1413,7 @@ NOTIFY pgrst, 'reload schema';
         
         <div className="relative flex-grow min-h-0 bg-slate-900 rounded-xl overflow-hidden mb-6 flex flex-col">
           <div className="flex justify-between items-center p-3 bg-slate-800 text-slate-400 text-xs font-mono uppercase tracking-widest font-bold">
-            <span>Fix-RLS-v12.sql</span>
+            <span>Fix-RLS-v15.sql</span>
             <button 
               onClick={copyToClipboard}
               className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded cursor-pointer transition"
