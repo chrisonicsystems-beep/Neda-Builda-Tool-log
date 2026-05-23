@@ -45,7 +45,7 @@ import {
   Info
 } from 'lucide-react';
 import { analyzeTools } from './services/geminiService';
-import { fetchTools, fetchUsersAdminOnly, upsertSingleTool, upsertSingleUser, insertSingleUser, deleteSingleUser, uploadFile, supabase, signIn, getSession, signOut, fetchCurrentUserProfile, resetPasswordForEmail, updateAuthPassword } from './services/supabaseService';
+import { fetchTools, fetchUsersAdminOnly, upsertSingleTool, upsertSingleUser, deleteSingleUser, uploadFile, supabase, signIn, getSession, signOut, fetchCurrentUserProfile, resetPasswordForEmail, updateAuthPassword } from './services/supabaseService';
 import { WAREHOUSES, DEFAULT_WAREHOUSE } from './constants';
 
 const TEMP_PASSWORD_PREFIX = "NEDA-RESET-";
@@ -404,7 +404,7 @@ const App: React.FC = () => {
   const handleAddUser = async (newUser: User) => {
     setIsSyncing(true);
     try {
-      await insertSingleUser(newUser);
+      await upsertSingleUser(newUser);
       setAllUsers(prev => [...prev, newUser]);
       setSyncSuccess(`Staff member added.`);
       setShowAddUser(false);
@@ -1693,13 +1693,15 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
       
       {activeTab === 'USERS' && (
         <div className="space-y-4 animate-in fade-in">
-          <button onClick={onShowAddUser} className="w-full flex items-center justify-between p-6 bg-slate-50 border border-dashed border-slate-200 rounded-[2rem] hover:bg-slate-100 transition-colors">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-2xl bg-white flex items-center justify-center shadow-sm text-neda-orange"><UserPlus size={24} /></div>
-              <div className="text-left"><h4 className="font-black text-neda-navy uppercase text-xs">Onboard Staff</h4></div>
-            </div>
-            <PlusCircle size={24} className="text-neda-orange" />
-          </button>
+          {userRole === UserRole.ADMIN && (
+            <button onClick={onShowAddUser} className="w-full flex items-center justify-between p-6 bg-slate-50 border border-dashed border-slate-200 rounded-[2rem] hover:bg-slate-100 transition-colors">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-2xl bg-white flex items-center justify-center shadow-sm text-neda-orange"><UserPlus size={24} /></div>
+                <div className="text-left"><h4 className="font-black text-neda-navy uppercase text-xs">Onboard Staff</h4></div>
+              </div>
+              <PlusCircle size={24} className="text-neda-orange" />
+            </button>
+          )}
           
           <div className="grid gap-3">
             {allUsers.map((user: User) => (
@@ -1720,10 +1722,12 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
                     </div>
                   </div>
                   <div className="flex items-center gap-1">
-                    <button onClick={() => setEditingUser(user)} className="p-2 text-neda-navy hover:bg-slate-50 rounded-xl transition-colors">
-                      <Edit size={18} />
-                    </button>
-                    {user.id !== currentUserId && (
+                    {userRole === UserRole.ADMIN && (
+                      <button onClick={() => setEditingUser(user)} className="p-2 text-neda-navy hover:bg-slate-50 rounded-xl transition-colors">
+                        <Edit size={18} />
+                      </button>
+                    )}
+                    {userRole === UserRole.ADMIN && user.id !== currentUserId && (
                       <button onClick={() => onDeleteUser(user)} className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors">
                         <Trash2 size={18} />
                       </button>
