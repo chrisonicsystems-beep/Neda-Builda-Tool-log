@@ -169,19 +169,18 @@ const App: React.FC = () => {
           if (profileResponse.data && profileResponse.data.isEnabled) {
              const freshData = profileResponse.data;
              setCurrentUser(prev => {
-                // If we already have the user, just update it, otherwise set it fresh
                 if (prev) {
                    return { ...prev, mustChangePassword: event === 'PASSWORD_RECOVERY' || prev.mustChangePassword };
                 }
                 return { ...freshData, mustChangePassword: isRecovering || event === 'PASSWORD_RECOVERY' || freshData.mustChangePassword } as User;
              });
+             localStorage.setItem('et_user', JSON.stringify({ ...freshData, mustChangePassword: false }));
           } else if (!profileResponse.error || (profileResponse.data && !profileResponse.data.isEnabled)) {
              console.error("Auth state change: Profile invalid or not found", profileResponse.error);
              setSyncError("Your account could not be found or is disabled.");
              await signOut();
           } else {
              console.error("Auth state change: Network error fetching profile", profileResponse.error);
-             setSyncError("Network error: Could not verify account status.");
           }
         }
       });
@@ -191,6 +190,7 @@ const App: React.FC = () => {
     const init = async () => {
       try {
         let roleToPass: UserRole | undefined = undefined;
+        let finalCurrentUser: User | null = null;
         const session = await getSession();
         
         // Robust check for password recovery hash since race conditions can happen
@@ -199,34 +199,44 @@ const App: React.FC = () => {
           isRecovering = true;
         }
         
+        // Try memory cache first to provide immediate UI setup
+        const savedUserStr = localStorage.getItem('et_user');
+        if (savedUserStr) {
+           finalCurrentUser = JSON.parse(savedUserStr);
+           roleToPass = finalCurrentUser?.role;
+        }
+
         if (session?.user?.id) {
           // Logged in with Supabase
           const profileResponse = await fetchCurrentUserProfile(session.user);
           if (profileResponse.data && profileResponse.data.isEnabled) {
-            setCurrentUser({ ...profileResponse.data, mustChangePassword: isRecovering || profileResponse.data.mustChangePassword });
-            roleToPass = profileResponse.data.role;
+            finalCurrentUser = { ...profileResponse.data, mustChangePassword: isRecovering || profileResponse.data.mustChangePassword } as User;
+            roleToPass = finalCurrentUser.role;
+            localStorage.setItem('et_user', JSON.stringify({ ...finalCurrentUser, mustChangePassword: false }));
           } else if (!profileResponse.error || (profileResponse.data && !profileResponse.data.isEnabled)) {
             // Profile not enabled or not found, sign out automatically
             console.error("Init: Profile invalid or not found", profileResponse);
             setSyncError("Your account could not be found or is disabled.");
             await signOut();
+            finalCurrentUser = null;
           } else {
             console.error("Init: Network error fetching profile", profileResponse.error);
-            setSyncError("Network error: Could not verify account status.");
+            if (!finalCurrentUser) {
+              setSyncError(`Network warning: ${profileResponse.error?.message || 'Retrying...'}`);
+            }
           }
         }
 
+        if (finalCurrentUser) {
+           setCurrentUser(finalCurrentUser);
+        }
+
         const result = await loadData(roleToPass);
-        if (result && !session?.user?.id) {
-          // Fallback for biometric / memory if needed
-          const savedUserStr = localStorage.getItem('et_user');
-          if (savedUserStr) {
-            const savedUser = JSON.parse(savedUserStr);
-            const freshUser = result.finalUsers.find(u => u.email.toLowerCase() === savedUser.email.toLowerCase());
-            if (freshUser) {
-              setCurrentUser(freshUser);
-            }
-          }
+        if (result && !session?.user?.id && finalCurrentUser) {
+             const freshUser = result.finalUsers.find(u => u.email.toLowerCase() === finalCurrentUser!.email.toLowerCase());
+             if (freshUser) {
+               setCurrentUser(freshUser);
+             }
         }
         
         if (window.PublicKeyCredential && typeof window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable === 'function') {
@@ -1313,6 +1323,7 @@ ALTER TABLE public.users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN D
 -- 2. Drop any previous upsert functions to ensure a fresh replacement
 DROP FUNCTION IF EXISTS public.upsert_user_admin(jsonb);
 DROP FUNCTION IF EXISTS public.admin_create_staff(text, text, text, text, text);
+DROP FUNCTION IF EXISTS public.update_own_profile(jsonb);
 
 -- 3. Create a reliable RPC for Admins to create Auth accounts directly!
 CREATE OR REPLACE FUNCTION public.admin_create_staff(
@@ -1382,10 +1393,37 @@ BEGIN
 END;
 $$;
 
--- 4. Correctly set the owner to bypass RLS internally
-ALTER FUNCTION public.admin_create_staff(text, text, text, text, text) OWNER TO postgres;
+-- 4. Create an RPC for users to update their own profile securely
+CREATE OR REPLACE FUNCTION public.update_own_profile(user_data jsonb)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  -- Ensure caller is updating their own profile OR is an Admin
+  IF NOT EXISTS (
+    SELECT 1 FROM public.users 
+    WHERE auth_uid = auth.uid() AND (role = 'ADMIN' OR id = (user_data->>'id')) AND is_enabled = true
+  ) THEN
+    RAISE EXCEPTION 'Access denied. You can only update your own profile.';
+  END IF;
 
--- 5. Hard flush the schema cache so the frontend can see the function
+  UPDATE public.users SET
+    name = user_data->>'name',
+    role = user_data->>'role',
+    email = user_data->>'email',
+    is_enabled = COALESCE((user_data->>'is_enabled')::boolean, is_enabled),
+    must_change_password = COALESCE((user_data->>'must_change_password')::boolean, must_change_password)
+  WHERE id = user_data->>'id';
+END;
+$$;
+
+-- 5. Correctly set the owner to bypass RLS internally
+ALTER FUNCTION public.admin_create_staff(text, text, text, text, text) OWNER TO postgres;
+ALTER FUNCTION public.update_own_profile(jsonb) OWNER TO postgres;
+
+-- 6. Flush schema cache
 NOTIFY pgrst, 'reload schema';
 
 COMMIT;`;
@@ -1414,7 +1452,7 @@ COMMIT;`;
         
         <div className="relative flex-grow min-h-0 bg-slate-900 rounded-xl overflow-hidden mb-6 flex flex-col">
           <div className="flex justify-between items-center p-3 bg-slate-800 text-slate-400 text-xs font-mono uppercase tracking-widest font-bold">
-            <span>Fix-RLS-v16.sql</span>
+            <span>Fix-RLS-v17.sql</span>
             <button 
               onClick={copyToClipboard}
               className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded cursor-pointer transition"

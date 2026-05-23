@@ -116,12 +116,9 @@ const mapUserToDb = (user: User) => {
     role: user.role,
     email: user.email,
     auth_uid: user.authUid,
-    is_enabled: user.isEnabled
+    is_enabled: user.isEnabled,
+    must_change_password: user.mustChangePassword === true
   };
-
-  if (user.mustChangePassword) {
-    payload.must_change_password = true;
-  }
 
   return cleanPayload(payload);
 };
@@ -188,10 +185,21 @@ export const upsertSingleUser = async (user: User) => {
   const fullData = mapUserToDb(user);
   
   try {
-    const { error: rpcError } = await supabase.rpc('upsert_user_admin', { user_data: fullData });
+    let rpcError = null;
+    
+    // Attempt to use the secure profile updater RPC first
+    const { error: profileError } = await supabase.rpc('update_own_profile', { user_data: fullData });
+    
+    // If that fails because it doesn't exist yet, try the old admin one
+    if (profileError && (profileError.message.includes('find the function') || profileError.message.includes('function '))) {
+        const { error: oldRpcErr } = await supabase.rpc('upsert_user_admin', { user_data: fullData });
+        rpcError = oldRpcErr;
+    } else if (profileError) {
+        rpcError = profileError; // Other error, assume failure
+    }
 
-    // Fallback to normal upsert if RPC doesn't exist yet (before SQL is run)
-    if (rpcError && (rpcError.message.includes('find the function') || rpcError.message.includes('function upsert_user_admin'))) {
+    // Fallback to normal upsert if RPCs don't exist yet (before SQL is run)
+    if (rpcError && (rpcError.message.includes('find the function') || rpcError.message.includes('function '))) {
        const { error } = await supabase
         .from('users')
         .upsert(fullData, { onConflict: 'id' });
@@ -394,7 +402,11 @@ export const fetchCurrentUserProfile = async (sessionUser: any): Promise<{ data:
             await supabase.rpc('auto_link_verified_user');
           } catch (e) {
              console.warn("RPC link failed, falling back to client update", e);
-             await supabase.from('users').update({ auth_uid: authUid }).eq('id', emailRes.data.id);
+             try {
+                await supabase.from('users').update({ auth_uid: authUid }).eq('id', emailRes.data.id);
+             } catch (updateErr) {
+                console.warn("Client update failed too, but continuing login", updateErr);
+             }
           }
           res = emailRes;
        } else {
