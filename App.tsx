@@ -1733,79 +1733,10 @@ const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, onBiometricLogi
                   <p className="text-[10px] font-black uppercase tracking-widest text-neda-orange px-2">Not migrated yet? Ask your Administrator to reset your password so you can sign in.</p>
                 </div>
                 
-                <div className="bg-amber-50 p-4 rounded-xl border border-amber-100 text-left mb-8 mx-auto">
-                    <p className="text-[10px] font-black text-amber-800 uppercase tracking-widest mb-2 flex items-center gap-2">
-                       <AlertTriangle size={14} /> iOS / Safari Users
+                <div className="bg-slate-50 p-4 rounded-xl text-left mb-8 mx-auto border border-slate-100">
+                    <p className="text-[11px] text-slate-500 font-bold uppercase tracking-widest leading-relaxed">
+                      Please check your inbox. We've sent a magic link to securely reset your password.
                     </p>
-                    <p className="text-[11px] text-amber-900 leading-relaxed font-medium mb-4">
-                      Due to browser constraints in this preview environment, clicking the link directly from your email app will drop you back at the login screen. 
-                      <br/><br/>
-                      <strong>DO NOT paste the link into your browser address bar.</strong> Copy the URL from the email and paste it directly into this box below:
-                    </p>
-                    <input 
-                      type="text" 
-                      placeholder="Paste your email link here..." 
-                      className="w-full py-3 px-4 bg-white border border-amber-200 text-amber-900 rounded-lg text-xs font-mono shadow-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
-                      onChange={async (e) => {
-                         const val = e.target.value;
-                         if (val && (val.includes('code=') || val.includes('token='))) {
-                           try {
-                             let code = '';
-                             let token = '';
-                             
-                             if (val.startsWith('http')) {
-                               try {
-                                 const url = new URL(val);
-                                 code = url.searchParams.get('code') || '';
-                                 token = url.searchParams.get('token') || '';
-                               } catch (err) {}
-                             }
-                             
-                             if (!code && !token) {
-                               const codeMatch = val.match(/code=([^&]+)/);
-                               if (codeMatch) code = codeMatch[1];
-                               const tokenMatch = val.match(/token=([^&]+)/);
-                               if (tokenMatch) token = tokenMatch[1];
-                             }
-
-                             if (code && supabase) {
-                               const { data, error } = await supabase.auth.exchangeCodeForSession(code);
-                               if (!error && data.session) {
-                                 window.location.replace(window.location.pathname + "?type=recovery");
-                               }
-                             } else if (token && supabase) {
-                               // Explicitly do not pass email, use token_hash for PKCE links
-                               const { data, error } = await (supabase.auth.verifyOtp as any)({
-                                 token_hash: token,
-                                 type: 'recovery'
-                               });
-                               
-                               if (!error && data?.session) {
-                                 window.location.replace(window.location.pathname + "?type=recovery");
-                               } else {
-                                  // Fallback for non-PKCE if applicable and email is known
-                                  if (forgotEmail) {
-                                    const { data: d2, error: e2 } = await supabase.auth.verifyOtp({
-                                       email: forgotEmail,
-                                       token: token,
-                                       type: 'recovery'
-                                    });
-                                    if (!e2 && d2?.session) {
-                                       window.location.replace(window.location.pathname + "?type=recovery");
-                                    } else {
-                                       alert("Recovery link invalid or expired.");
-                                    }
-                                  } else {
-                                     alert("Link invalid. Please restart the forgot password process.");
-                                  }
-                               }
-                             }
-                           } catch(err) {
-                             console.error("Manual code parse error", err);
-                           }
-                         }
-                      }}
-                    />
                 </div>
                 <button onClick={() => setShowForgotModal(false)} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg">Done</button>
               </div>
