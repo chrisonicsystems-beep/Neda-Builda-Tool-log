@@ -188,28 +188,124 @@ export const upsertSingleUser = async (user: User) => {
   const fullData = mapUserToDb(user);
   
   try {
-    const { error } = await supabase
-      .from('users')
-      .upsert(fullData, { onConflict: 'id' });
-    
-    if (error) {
-      if (error.message.includes('must_change_password')) {
-        const { must_change_password, ...safeData } = fullData;
-        const { error: retryError } = await supabase
-          .from('users')
-          .upsert(safeData, { onConflict: 'id' });
-        if (retryError) throw retryError;
-      } else {
-        throw error;
+    const { error: rpcError } = await supabase.rpc('upsert_user_admin', { user_data: fullData });
+
+    // Fallback to normal upsert if RPC doesn't exist yet (before SQL is run)
+    if (rpcError && (rpcError.message.includes('find the function') || rpcError.message.includes('function upsert_user_admin'))) {
+       const { error } = await supabase
+        .from('users')
+        .upsert(fullData, { onConflict: 'id' });
+      
+      if (error) {
+        if (error.message.includes('must_change_password')) {
+          const { must_change_password, ...safeData } = fullData;
+          const { error: retryError } = await supabase
+            .from('users')
+            .upsert(safeData, { onConflict: 'id' });
+          if (retryError) throw retryError;
+        } else {
+          throw error;
+        }
       }
+    } else if (rpcError) {
+       throw rpcError;
     }
   } catch (err: any) {
     console.error("Supabase Upsert User Critical Error:", err);
+    if (err.message && err.message.toLowerCase().includes('violates row-level security policy')) {
+       throw new Error(`DB_MIGRATION_REQUIRED`);
+    }
     throw new Error(`Sync Error: ${err.message}`);
   }
 };
 
 
+
+export const onboardNewStaff = async (user: User) => {
+  if (!supabase) return;
+  
+  console.log("Onboarding new staff via direct fetch API...", user.email);
+  
+  // 1. Create user in auth.users using raw fetch to absolutely prevent session contamination
+  let newAuthUid: string | undefined = undefined;
+  try {
+    const res = await fetch(`${supabaseUrl}/auth/v1/signup`, {
+      method: 'POST',
+      headers: {
+        'apikey': supabaseAnonKey,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        email: user.email,
+        password: user.password || 'Password123'
+      })
+    });
+    const data = await res.json();
+    console.log("Raw signup response:", data);
+    
+    const errMessage = data.message || data.msg || data.error_description || (typeof data.error === 'string' ? data.error : '');
+    
+    // If it fails with something other than already registered, we abort
+    if (!res.ok) {
+        if (!errMessage || !errMessage.toLowerCase().includes('already registered')) {
+            throw new Error(errMessage || `Signup failed with status ${res.status}`);
+        }
+    }
+    
+    // GoTrue signup returns either a User object directly or a Session object wrapper
+    if (data.user?.id) {
+        newAuthUid = data.user.id;
+    } else if (data.id) {
+        newAuthUid = data.id;
+    }
+  } catch (err: any) {
+     if (err.message && !err.message.includes('already registered')) {
+        throw new Error(`Failed to create Auth account: ${err.message}`);
+     }
+  }
+
+  // 2. Insert into public.users with the new auth_uid (if available)
+  const fullData = mapUserToDb(user);
+  if (newAuthUid) {
+    fullData.auth_uid = newAuthUid;
+  }
+
+  let currentSession: any;
+  try {
+    const sessionRes = await supabase.auth.getSession();
+    currentSession = sessionRes.data;
+    console.log("Session right before upsert:", currentSession?.session?.user?.email);
+    
+    const { error: rpcError } = await supabase.rpc('upsert_user_admin', { user_data: fullData });
+
+    if (rpcError && (rpcError.message.includes('find the function') || rpcError.message.includes('function upsert_user_admin'))) {
+      const { error: insertError } = await supabase
+        .from('users')
+        .upsert(fullData, { onConflict: 'id' });
+
+      if (insertError) {
+        if (insertError.message.includes('must_change_password')) {
+          const { must_change_password, ...safeData } = fullData;
+          const { error: retryError } = await supabase
+            .from('users')
+            .upsert(safeData, { onConflict: 'id' });
+          if (retryError) throw retryError;
+        } else {
+          throw insertError;
+        }
+      }
+    } else if (rpcError) {
+      throw rpcError;
+    }
+  } catch (err: any) {
+    console.error("Supabase Onboard User Critical Error:", err);
+    if (err.message && err.message.toLowerCase().includes('violates row-level security policy')) {
+       try { await supabase.auth.refreshSession(); } catch(e) {}
+       throw new Error(`DB_MIGRATION_REQUIRED`);
+    }
+    throw new Error(`Database Sync Error: ${err.message}`);
+  }
+};
 
 export const deleteSingleUser = async (userId: string) => {
   if (!supabase) return;
@@ -274,6 +370,19 @@ export const signIn = async (email: string, password: string): Promise<{ data: U
     supabase.auth.signInWithPassword({ email, password }),
     new Promise<any>((resolve) => setTimeout(() => resolve({ data: null, error: new Error('Request timed out (preventing iframe hang)') }), 15000))
   ]);
+
+  // If login succeeded, try to auto-link the legacy table just in case they were unlinked
+  if (authData?.user && !authError) {
+    try {
+      await supabase.rpc('migrate_legacy_user', {
+        p_email: email,
+        p_password: password,
+        p_auth_uid: authData.user.id
+      });
+    } catch (e) {
+      console.warn("Soft migration failed on signin", e);
+    }
+  }
   
   // Auto-migrate legacy users who don't have a Supabase Auth account yet
   if (authError && authError.message.toLowerCase().includes('invalid login credentials')) {
@@ -345,8 +454,13 @@ export const fetchCurrentUserProfile = async (sessionUser: any): Promise<{ data:
        
        if (emailRes.data && !emailRes.error) {
           // Found by email. Let's auto-fix the auth_uid for future logins!
-          console.log(`Found profile by email, fixing auth_uid in database to ${authUid}...`);
-          await supabase.from('users').update({ auth_uid: authUid }).eq('id', emailRes.data.id);
+          console.log(`Found profile by email, attempting to link auth_uid via RPC...`);
+          try {
+            await supabase.rpc('auto_link_verified_user');
+          } catch (e) {
+             console.warn("RPC link failed, falling back to client update", e);
+             await supabase.from('users').update({ auth_uid: authUid }).eq('id', emailRes.data.id);
+          }
           res = emailRes;
        } else {
           // AUTO-PROVISIONING for valid authenticated users missing from public.users
@@ -358,8 +472,7 @@ export const fetchCurrentUserProfile = async (sessionUser: any): Promise<{ data:
               role: 'USER',
               email: email,
               auth_uid: authUid,
-              is_enabled: true,
-              must_change_password: true
+              is_enabled: true
           }).select('*').single();
           
           if (insertData && !insertError) {

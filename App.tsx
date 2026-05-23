@@ -42,10 +42,11 @@ import {
   Wifi,
   WifiOff,
   RefreshCw,
-  Info
+  Info,
+  Copy
 } from 'lucide-react';
 import { analyzeTools } from './services/geminiService';
-import { fetchTools, fetchUsersAdminOnly, upsertSingleTool, upsertSingleUser, deleteSingleUser, uploadFile, supabase, signIn, getSession, signOut, fetchCurrentUserProfile, resetPasswordForEmail, updateAuthPassword } from './services/supabaseService';
+import { fetchTools, fetchUsersAdminOnly, upsertSingleTool, upsertSingleUser, onboardNewStaff, deleteSingleUser, uploadFile, supabase, signIn, getSession, signOut, fetchCurrentUserProfile, resetPasswordForEmail, updateAuthPassword } from './services/supabaseService';
 import { WAREHOUSES, DEFAULT_WAREHOUSE } from './constants';
 
 const TEMP_PASSWORD_PREFIX = "NEDA-RESET-";
@@ -78,6 +79,7 @@ const App: React.FC = () => {
   const [returningTool, setReturningTool] = useState<Tool | null>(null);
   const [bookingTool, setBookingTool] = useState<Tool | null>(null);
   const [selectedToolForDetail, setSelectedToolForDetail] = useState<Tool | null>(null);
+  const [adminLinkBroken, setAdminLinkBroken] = useState(false);
 
   const loadData = async (userRole?: UserRole) => {
     try {
@@ -92,6 +94,10 @@ const App: React.FC = () => {
       const toolError = toolResponse.error;
       const remoteUsers = userResponse.data;
       const remoteTools = toolResponse.data;
+
+      if (userError?.message?.includes('Access denied') || userError?.message?.includes('row-level security policy') || (userError && (userRole === UserRole.ADMIN || currentUser?.role === UserRole.ADMIN) && !remoteUsers)) {
+         setAdminLinkBroken(true);
+      }
 
       if (userError || toolError) {
         const errorMsg = toolError?.message || userError?.message || 'Database connection failure';
@@ -401,14 +407,20 @@ const App: React.FC = () => {
     }
   };
 
+  const [showDbFixModal, setShowDbFixModal] = useState(false);
+
   const handleAddUser = async (newUser: User) => {
     setIsSyncing(true);
     try {
-      await upsertSingleUser(newUser);
+      await onboardNewStaff(newUser);
       setAllUsers(prev => [...prev, newUser]);
       setSyncSuccess(`Staff member added.`);
       setShowAddUser(false);
     } catch (e: any) {
+      if (e.message && (e.message.includes('DB_MIGRATION_REQUIRED') || e.message.includes('must_change_password') || e.message.includes('find the function upsert_user_admin') || e.message.includes('type uuid'))) {
+        setShowDbFixModal(true);
+        throw new Error('Database configuration requires your attention.');
+      }
       setSyncError("Add Failed: " + e.message);
       throw e;
     } finally {
@@ -653,6 +665,31 @@ const App: React.FC = () => {
     });
   };
 
+  if (adminLinkBroken && currentUser?.role === UserRole.ADMIN) {
+    return (
+      <div className="min-h-screen bg-neda-navy flex flex-col items-center justify-center p-6 text-center text-white">
+        <div className="w-full max-w-[480px] bg-white text-neda-navy rounded-[3.5rem] p-10 shadow-2xl flex flex-col items-center">
+          <div className="bg-red-100 w-16 h-16 rounded-full flex items-center justify-center mb-6">
+            <ShieldAlert size={32} className="text-red-600" />
+          </div>
+          <h2 className="text-2xl font-black uppercase mb-4">Admin Link Broken</h2>
+          <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest leading-relaxed mb-8">
+            Your database account cannot perform Admin actions because it isn't linked to your Supabase Auth user.
+          </p>
+          <div className="w-full bg-slate-50 p-6 rounded-2xl border border-slate-100 mb-8 max-h-[150px] overflow-y-auto">
+            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest text-left mb-3">Copy and run this inside your Supabase SQL Editor:</p>
+            <code className="text-[10px] sm:text-xs text-left block text-red-600 font-mono p-4 bg-white rounded-xl break-words whitespace-pre-wrap select-all">
+              UPDATE public.users SET auth_uid = (SELECT id FROM auth.users WHERE email = public.users.email) WHERE role = 'ADMIN' AND auth_uid IS NULL;
+            </code>
+          </div>
+          <button onClick={() => { setAdminLinkBroken(false); handleLogout(); }} className="w-full bg-slate-100 text-slate-500 hover:bg-slate-200 transition-colors py-4 rounded-2xl font-black uppercase tracking-widest text-xs">
+            Sign Out For Now
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <Layout 
       activeView={view} 
@@ -695,6 +732,7 @@ const App: React.FC = () => {
         )}
       </div>
 
+      {showDbFixModal && <DatabaseFixModal onClose={() => setShowDbFixModal(false)} />}
       {showAddUser && <AddUserModal onClose={() => setShowAddUser(false)} onSave={handleAddUser} />}
       {showAddTool && <AddToolModal onClose={() => setShowAddTool(false)} onSave={handleAddTool} />}
       {returningTool && <ReturnToolModal tool={returningTool} onClose={() => setReturningTool(null)} onConfirm={handleReturnTool} />}
@@ -1252,6 +1290,119 @@ const ReturnToolModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (c
             Complete Return
           </button>
         </div>
+      </div>
+    </div>
+  );
+};
+
+const DatabaseFixModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+  const [copied, setCopied] = useState(false);
+  
+  const sqlCommand = `-- 0. Release any stagnant locks from previous failed runs!
+ROLLBACK;
+
+-- 1. Auto-Link Admin Accounts that are missing their auth_uid
+UPDATE public.users u
+SET auth_uid = a.id
+FROM auth.users a
+WHERE u.email = a.email
+  AND u.role = 'ADMIN'
+  AND (u.auth_uid IS NULL OR u.auth_uid != a.id);
+
+-- 2. Drop existing function to ensure a fresh replacement
+DROP FUNCTION IF EXISTS public.upsert_user_admin(jsonb);
+
+-- 3. Create the RPC for Admins to Upsert Users safely
+CREATE OR REPLACE FUNCTION public.upsert_user_admin(user_data jsonb)
+RETURNS boolean
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_auth_uid uuid;
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM public.users 
+    WHERE auth_uid = auth.uid() AND role = 'ADMIN' AND is_enabled = true
+  ) THEN
+    v_auth_uid := CAST(NULLIF(user_data->>'auth_uid', '') AS uuid);
+    IF v_auth_uid IS NULL THEN
+      SELECT id INTO v_auth_uid FROM auth.users WHERE email = user_data->>'email' LIMIT 1;
+    END IF;
+
+    INSERT INTO public.users (id, email, name, role, is_enabled, auth_uid)
+    VALUES (
+      user_data->>'id',
+      user_data->>'email',
+      user_data->>'name',
+      user_data->>'role',
+      COALESCE((user_data->>'is_enabled')::boolean, true),
+      v_auth_uid
+    )
+    ON CONFLICT (id) DO UPDATE SET
+      email = EXCLUDED.email,
+      name = EXCLUDED.name,
+      role = EXCLUDED.role,
+      is_enabled = EXCLUDED.is_enabled,
+      auth_uid = COALESCE(v_auth_uid, public.users.auth_uid);
+    RETURN true;
+  ELSE
+    RAISE EXCEPTION 'Access denied. You must be an ADMIN.';
+  END IF;
+END;
+$$;
+
+-- 4. Correctly set the owner to bypass RLS internally
+ALTER FUNCTION public.upsert_user_admin(jsonb) OWNER TO postgres;
+
+-- 5. Hard flush the schema cache so the frontend can see the function
+NOTIFY pgrst, 'reload schema';
+`;
+
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(sqlCommand);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 3000);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[1000] bg-black/90 backdrop-blur-md flex flex-col items-center justify-center p-6 animate-in fade-in">
+      <div className="bg-white w-full max-w-2xl max-h-[90vh] rounded-3xl p-6 shadow-2xl flex flex-col">
+        <div className="flex justify-between items-center mb-4 text-red-600">
+          <div className="flex items-center gap-2">
+            <ShieldAlert size={28} />
+            <h2 className="text-2xl font-black uppercase tracking-tight">Database Migration Required</h2>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-red-50 rounded-full text-red-600"><X size={24} /></button>
+        </div>
+        
+        <p className="text-gray-700 font-medium mb-4">
+          Your Supabase database requires a structural update to allow Administrators to add new staff. 
+          Please copy the SQL below and run it in your <strong>Supabase Dashboard &gt; SQL Editor</strong>.
+        </p>
+        
+        <div className="relative flex-grow min-h-0 bg-slate-900 rounded-xl overflow-hidden mb-6 flex flex-col">
+          <div className="flex justify-between items-center p-3 bg-slate-800 text-slate-400 text-xs font-mono uppercase tracking-widest font-bold">
+            <span>Fix-RLS-v12.sql</span>
+            <button 
+              onClick={copyToClipboard}
+              className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded cursor-pointer transition"
+            >
+              <Copy size={14} /> {copied ? "Copied!" : "Copy SQL"}
+            </button>
+          </div>
+          <div className="p-4 overflow-y-auto flex-grow text-sm font-mono text-emerald-400 whitespace-pre">
+            {sqlCommand}
+          </div>
+        </div>
+        
+        <button 
+          onClick={onClose}
+          className="w-full py-4 bg-neda-navy text-white rounded-xl font-black uppercase tracking-widest shadow-xl active:scale-[0.98] transition-all cursor-pointer"
+        >
+          I have executed this SQL
+        </button>
       </div>
     </div>
   );
