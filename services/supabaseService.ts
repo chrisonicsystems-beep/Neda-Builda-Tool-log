@@ -23,7 +23,7 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || import.meta.env.VITE_Su
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_Supabase_Anon_Key || (typeof process !== 'undefined' && process?.env?.SUPABASE_ANON_KEY);
 
 export const supabase = (supabaseUrl && supabaseAnonKey && supabaseUrl !== '' && supabaseAnonKey !== '') 
-  ? createClient(supabaseUrl, supabaseAnonKey, { auth: { lock: dummyLock } }) 
+  ? createClient(supabaseUrl, supabaseAnonKey, { auth: { lock: dummyLock, flowType: 'implicit' } }) 
   : null;
 
 if (!supabase) {
