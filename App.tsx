@@ -1738,12 +1738,13 @@ const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, onBiometricLogi
                        <AlertTriangle size={14} /> iOS / Safari Users
                     </p>
                     <p className="text-[11px] text-amber-900 leading-relaxed font-medium mb-4">
-                      Due to browser constraints, clicking the link directly from your email app might fail. 
-                      <strong>Copy the URL from the email and paste it here manually:</strong>
+                      Due to browser constraints in this preview environment, clicking the link directly from your email app will drop you back at the login screen. 
+                      <br/><br/>
+                      <strong>DO NOT paste the link into your browser address bar.</strong> Copy the URL from the email and paste it directly into this box below:
                     </p>
                     <input 
                       type="text" 
-                      placeholder="Paste full email link here..." 
+                      placeholder="Paste your email link here..." 
                       className="w-full py-3 px-4 bg-white border border-amber-200 text-amber-900 rounded-lg text-xs font-mono shadow-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
                       onChange={async (e) => {
                          const val = e.target.value;
@@ -1773,22 +1774,29 @@ const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, onBiometricLogi
                                  window.location.replace(window.location.pathname + "?type=recovery");
                                }
                              } else if (token && supabase) {
-                               const { data, error } = await supabase.auth.verifyOtp({
-                                 email: forgotEmail,
-                                 token: token,
+                               // Explicitly do not pass email, use token_hash for PKCE links
+                               const { data, error } = await (supabase.auth.verifyOtp as any)({
+                                 token_hash: token,
                                  type: 'recovery'
                                });
                                
-                               if (!error && data.session) {
+                               if (!error && data?.session) {
                                  window.location.replace(window.location.pathname + "?type=recovery");
                                } else {
-                                  const { data: d2, error: e2 } = await (supabase.auth.verifyOtp as any)({
-                                     email: forgotEmail,
-                                     token_hash: token,
-                                     type: 'recovery'
-                                  });
-                                  if (!e2 && d2?.session) {
-                                     window.location.replace(window.location.pathname + "?type=recovery");
+                                  // Fallback for non-PKCE if applicable and email is known
+                                  if (forgotEmail) {
+                                    const { data: d2, error: e2 } = await supabase.auth.verifyOtp({
+                                       email: forgotEmail,
+                                       token: token,
+                                       type: 'recovery'
+                                    });
+                                    if (!e2 && d2?.session) {
+                                       window.location.replace(window.location.pathname + "?type=recovery");
+                                    } else {
+                                       alert("Recovery link invalid or expired.");
+                                    }
+                                  } else {
+                                     alert("Link invalid. Please restart the forgot password process.");
                                   }
                                }
                              }
