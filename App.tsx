@@ -45,7 +45,7 @@ import {
   Info
 } from 'lucide-react';
 import { analyzeTools } from './services/geminiService';
-import { fetchTools, fetchUsersAdminOnly, upsertSingleTool, upsertSingleUser, deleteSingleUser, uploadFile, supabase, signIn, getSession, signOut, fetchCurrentUserProfile, resetPasswordForEmail, updateAuthPassword } from './services/supabaseService';
+import { fetchTools, fetchUsersAdminOnly, upsertSingleTool, upsertSingleUser, insertSingleUser, deleteSingleUser, uploadFile, supabase, signIn, getSession, signOut, fetchCurrentUserProfile, resetPasswordForEmail, updateAuthPassword } from './services/supabaseService';
 import { WAREHOUSES, DEFAULT_WAREHOUSE } from './constants';
 
 const TEMP_PASSWORD_PREFIX = "NEDA-RESET-";
@@ -403,12 +403,13 @@ const App: React.FC = () => {
   const handleAddUser = async (newUser: User) => {
     setIsSyncing(true);
     try {
-      await upsertSingleUser(newUser);
+      await insertSingleUser(newUser);
       setAllUsers(prev => [...prev, newUser]);
       setSyncSuccess(`Staff member added.`);
       setShowAddUser(false);
     } catch (e: any) {
       setSyncError("Add Failed: " + e.message);
+      throw e;
     } finally {
       setIsSyncing(false);
     }
@@ -428,6 +429,7 @@ const App: React.FC = () => {
       setShowAddTool(false);
     } catch (e: any) {
       setSyncError("Asset Error: " + e.message);
+      throw e;
     } finally {
       setIsSyncing(false);
     }
@@ -1254,13 +1256,29 @@ const ReturnToolModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (c
   );
 };
 
-const AddUserModal: React.FC<{ onClose: () => void; onSave: (u: User) => void }> = ({ onClose, onSave }) => {
+const AddUserModal: React.FC<{ onClose: () => void; onSave: (u: User) => Promise<void> }> = ({ onClose, onSave }) => {
   const [formData, setFormData] = useState({ name: '', email: '', password: 'Password123', role: UserRole.USER });
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSaving(true);
+    setLocalError(null);
+    try {
+      await onSave({ id: window.crypto.randomUUID ? window.crypto.randomUUID() : 'U' + Date.now(), ...formData, isEnabled: true, mustChangePassword: true });
+    } catch (err: any) {
+      setLocalError(err.message || 'An error occurred while saving.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-[700] bg-neda-navy/95 backdrop-blur-md flex items-center justify-center p-6 animate-in fade-in">
       <div className="bg-white w-full max-sm rounded-[2.5rem] p-8 shadow-2xl">
         <div className="flex justify-between items-center mb-6"><h2 className="text-xl font-black text-neda-navy uppercase">Onboard Staff</h2><button onClick={onClose} className="p-2 text-slate-300 hover:text-neda-navy"><X size={20} /></button></div>
-        <form onSubmit={e => { e.preventDefault(); onSave({ id: 'U' + Date.now(), ...formData, isEnabled: true, mustChangePassword: true }); }} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4">
           <input required className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm" placeholder="Full Name" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
           <input required type="email" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm" placeholder="Email Address" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} />
           <select className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm" value={formData.role} onChange={e => setFormData({...formData, role: e.target.value as UserRole})}>
@@ -1275,14 +1293,17 @@ const AddUserModal: React.FC<{ onClose: () => void; onSave: (u: User) => void }>
               <span className="uppercase text-slate-400">Passwords are case-sensitive. They will be required to change it on their first login.</span>
             </p>
           </div>
-          <button type="submit" className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg">Create Profile</button>
+          {localError && <div className="text-red-500 text-xs font-bold text-center mt-2">{localError}</div>}
+          <button disabled={isSaving} type="submit" className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg disabled:opacity-50">
+            {isSaving ? 'Saving...' : 'Create Profile'}
+          </button>
         </form>
       </div>
     </div>
   );
 };
 
-const AddToolModal: React.FC<{ onClose: () => void; onSave: (t: Tool) => void }> = ({ onClose, onSave }) => {
+const AddToolModal: React.FC<{ onClose: () => void; onSave: (t: Tool) => Promise<void> }> = ({ onClose, onSave }) => {
   const [formData, setFormData] = useState({ 
     name: '', 
     category: 'Power Tools', 
@@ -1294,6 +1315,8 @@ const AddToolModal: React.FC<{ onClose: () => void; onSave: (t: Tool) => void }>
     currentSite: DEFAULT_WAREHOUSE
   });
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1304,11 +1327,24 @@ const AddToolModal: React.FC<{ onClose: () => void; onSave: (t: Tool) => void }>
     }
   };
 
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSaving(true);
+    setLocalError(null);
+    try {
+      await onSave({ id: window.crypto.randomUUID ? window.crypto.randomUUID() : 'T' + Date.now(), ...formData, status: ToolStatus.AVAILABLE, logs: [] });
+    } catch (err: any) {
+      setLocalError(err.message || 'An error occurred while saving.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-[700] bg-neda-navy/95 backdrop-blur-md flex items-center justify-center p-6 animate-in fade-in">
       <div className="bg-white w-full max-sm rounded-[2.5rem] p-8 shadow-2xl max-h-[90vh] overflow-y-auto hide-scrollbar">
         <div className="flex justify-between items-center mb-6"><h2 className="text-xl font-black text-neda-navy uppercase">Add Equipment</h2><button onClick={onClose} className="p-2 text-slate-300 hover:text-neda-navy"><X size={20} /></button></div>
-        <form onSubmit={e => { e.preventDefault(); onSave({ id: 'T' + Date.now(), ...formData, status: ToolStatus.AVAILABLE, logs: [] }); }} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4">
           <div 
             onClick={() => fileInputRef.current?.click()} 
             className="w-full aspect-video bg-slate-50 border-2 border-dashed border-slate-100 rounded-2xl flex flex-col items-center justify-center cursor-pointer overflow-hidden relative mb-4"
@@ -1342,7 +1378,10 @@ const AddToolModal: React.FC<{ onClose: () => void; onSave: (t: Tool) => void }>
           </div>
           <input className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm" placeholder="Serial Number" value={formData.serialNumber} onChange={e => setFormData({...formData, serialNumber: e.target.value})} />
           <input type="date" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm" value={formData.dateOfPurchase} onChange={e => setFormData({...formData, dateOfPurchase: e.target.value})} />
-          <button type="submit" className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg">Register Asset</button>
+          {localError && <div className="text-red-500 text-xs font-bold text-center mt-2">{localError}</div>}
+          <button disabled={isSaving} type="submit" className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg disabled:opacity-50">
+            {isSaving ? 'Saving...' : 'Register Asset'}
+          </button>
         </form>
       </div>
     </div>

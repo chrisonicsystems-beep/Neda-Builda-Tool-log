@@ -209,6 +209,21 @@ export const upsertSingleUser = async (user: User) => {
   }
 };
 
+export const insertSingleUser = async (user: User) => {
+  if (!supabase) return;
+  const fullData = mapUserToDb(user);
+  const { error } = await supabase.from('users').insert(fullData);
+  if (error) {
+    if (error.message.includes('must_change_password')) {
+      const { must_change_password, ...safeData } = fullData;
+      const { error: retryError } = await supabase.from('users').insert(safeData);
+      if (retryError) throw retryError;
+    } else {
+      throw error;
+    }
+  }
+};
+
 export const deleteSingleUser = async (userId: string) => {
   if (!supabase) return;
   const { error } = await supabase.from('users').delete().eq('id', userId);
