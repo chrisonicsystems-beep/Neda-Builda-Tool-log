@@ -442,7 +442,7 @@ export const fetchCurrentUserProfile = async (sessionUser: any): Promise<{ data:
 export const resetPasswordForEmail = async (email: string) => {
   if (!supabase) return { error: new Error('Supabase client not initialized') };
   const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: `${window.location.origin}/`
+    redirectTo: `${window.location.origin}/?type=recovery`
   });
   return { data, error };
 };

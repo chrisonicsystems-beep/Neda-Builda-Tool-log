@@ -194,7 +194,7 @@ const App: React.FC = () => {
         const session = await getSession();
         
         // Robust check for password recovery hash since race conditions can happen
-        const hasRecoveryHash = window.location.hash.includes('type=recovery');
+        const hasRecoveryHash = window.location.hash.includes('type=recovery') || window.location.search.includes('type=recovery');
         if (hasRecoveryHash) {
           isRecovering = true;
         }
@@ -1621,8 +1621,8 @@ const MandatoryPasswordChange: React.FC<{ user: User; onUpdate: (u: User) => Pro
     try {
       await onUpdate({ ...user, password: newPassword, mustChangePassword: false });
       setIsDone(true);
-      if (window.location.hash.includes('type=recovery')) {
-        window.history.replaceState(null, document.title, window.location.pathname + window.location.search);
+      if (window.location.hash.includes('type=recovery') || window.location.search.includes('type=recovery')) {
+        window.history.replaceState(null, document.title, window.location.pathname);
       }
     } catch (err: any) {
       setError(err.message || "Failed to update profile.");
@@ -1728,9 +1728,20 @@ const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, onBiometricLogi
               <div className="animate-in zoom-in-95">
                 <div className="bg-green-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6"><Key size={32} className="text-green-600" /></div>
                 <h2 className="text-xl font-black text-neda-navy uppercase mb-2">Check Email</h2>
-                <div className="mb-8 space-y-3">
-                  <p className="text-xs font-bold text-slate-500">If your account is migrated, a recovery link has been sent.</p>
+                <div className="mb-6 space-y-3">
+                  <p className="text-xs font-bold text-slate-500">A recovery link has been sent to your email.</p>
                   <p className="text-[10px] font-black uppercase tracking-widest text-neda-orange px-2">Not migrated yet? Ask your Administrator to reset your password so you can sign in.</p>
+                </div>
+                
+                <div className="bg-amber-50 p-4 rounded-xl border border-amber-100 text-left mb-8 mx-auto">
+                    <p className="text-[10px] font-black text-amber-800 uppercase tracking-widest mb-2 flex items-center gap-2">
+                       <AlertTriangle size={14} /> iOS / Safari Users
+                    </p>
+                    <p className="text-xs text-amber-900 leading-relaxed font-medium">
+                      If you are testing in this preview app, clicking the link directly from your email app might fail. 
+                      <br/><br/>
+                      <strong>For best results, copy the link from your email and paste it directly into this exact browser window.</strong>
+                    </p>
                 </div>
                 <button onClick={() => setShowForgotModal(false)} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg">Done</button>
               </div>
