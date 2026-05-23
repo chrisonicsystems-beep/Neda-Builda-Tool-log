@@ -5,18 +5,8 @@ import { Tool, User, ToolStatus } from '../types';
 // Memory lock to bypass navigator.locks in iframes without causing race conditions
 const memoryLocks = new Map<string, Promise<void>>();
 const dummyLock = async (name: string, acquireTimeout: number, fn: () => Promise<any>) => {
-  while (memoryLocks.has(name)) {
-    await memoryLocks.get(name);
-  }
-  let release: () => void;
-  const promise = new Promise<void>((r) => { release = r; });
-  memoryLocks.set(name, promise);
-  try {
-    return await fn();
-  } finally {
-    memoryLocks.delete(name);
-    release!();
-  }
+  // Bypassing locks to prevent infinite hangs in the iframe preview environment
+  return await fn();
 };
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || import.meta.env.VITE_Supabase_URL || (typeof process !== 'undefined' && process?.env?.SUPABASE_URL);
