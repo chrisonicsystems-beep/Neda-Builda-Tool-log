@@ -1348,9 +1348,9 @@ BEGIN
     v_encrypted_password := extensions.crypt(new_password, extensions.gen_salt('bf'));
 
     INSERT INTO auth.users (
-      id, instance_id, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at, role, confirmation_token, email_change, email_change_token_new, recovery_token
+      id, instance_id, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at, role, aud, confirmation_token, email_change, email_change_token_new, recovery_token
     ) VALUES (
-      v_user_id, '00000000-0000-0000-0000-000000000000', new_email, v_encrypted_password, now(), '{"provider":"email","providers":["email"]}', '{}', now(), now(), 'authenticated', '', '', '', ''
+      v_user_id, '00000000-0000-0000-0000-000000000000', new_email, v_encrypted_password, now(), '{"provider":"email","providers":["email"]}', '{}', now(), now(), 'authenticated', 'authenticated', '', '', '', ''
     );
 
     INSERT INTO auth.identities (
@@ -1362,7 +1362,8 @@ BEGIN
     -- ALWAYS override the password to the requested one if the account already exists, 
     -- so that "Password123" (or whatever they set) is guaranteed to work!
     UPDATE auth.users 
-    SET encrypted_password = extensions.crypt(new_password, extensions.gen_salt('bf'))
+    SET encrypted_password = extensions.crypt(new_password, extensions.gen_salt('bf')),
+        aud = 'authenticated'
     WHERE id = v_user_id;
   END IF;
 
@@ -1413,7 +1414,7 @@ COMMIT;`;
         
         <div className="relative flex-grow min-h-0 bg-slate-900 rounded-xl overflow-hidden mb-6 flex flex-col">
           <div className="flex justify-between items-center p-3 bg-slate-800 text-slate-400 text-xs font-mono uppercase tracking-widest font-bold">
-            <span>Fix-RLS-v15.sql</span>
+            <span>Fix-RLS-v16.sql</span>
             <button 
               onClick={copyToClipboard}
               className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded cursor-pointer transition"
@@ -1584,14 +1585,11 @@ const MandatoryPasswordChange: React.FC<{ user: User; onUpdate: (u: User) => Pro
     setIsUpdating(true);
     setError('');
     try {
+      await onUpdate({ ...user, password: newPassword, mustChangePassword: false });
       setIsDone(true);
-      // Wait for 2 seconds to show the success message
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      // Clear the recovery hash from the URL so page refreshes don't trigger it again
       if (window.location.hash.includes('type=recovery')) {
         window.history.replaceState(null, document.title, window.location.pathname + window.location.search);
       }
-      await onUpdate({ ...user, password: newPassword, mustChangePassword: false });
     } catch (err: any) {
       setError(err.message || "Failed to update profile.");
     } finally {
