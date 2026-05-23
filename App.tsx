@@ -1737,11 +1737,38 @@ const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, onBiometricLogi
                     <p className="text-[10px] font-black text-amber-800 uppercase tracking-widest mb-2 flex items-center gap-2">
                        <AlertTriangle size={14} /> iOS / Safari Users
                     </p>
-                    <p className="text-xs text-amber-900 leading-relaxed font-medium">
+                    <p className="text-[11px] text-amber-900 leading-relaxed font-medium mb-4">
                       If you are testing in this preview app, clicking the link directly from your email app might fail. 
-                      <br/><br/>
-                      <strong>For best results, copy the link from your email and paste it directly into this exact browser window.</strong>
+                      Copy the URL from the email and paste it here manually:
                     </p>
+                    <input 
+                      type="text" 
+                      placeholder="Paste full URL here..." 
+                      className="w-full py-3 px-4 bg-white border border-amber-200 rounded-lg text-xs font-mono text-slate-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                      onChange={async (e) => {
+                         const val = e.target.value;
+                         if (val && val.includes('code=')) {
+                           try {
+                             let code = '';
+                             if (val.startsWith('http')) {
+                               const url = new URL(val);
+                               code = url.searchParams.get('code') || '';
+                             } else {
+                               const match = val.match(/code=([^&]+)/);
+                               if (match) code = match[1];
+                             }
+                             if (code && supabase) {
+                               const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+                               if (!error && data.session) {
+                                 window.location.replace(window.location.pathname + "?type=recovery");
+                               }
+                             }
+                           } catch(err) {
+                             console.error("Manual code parse error", err);
+                           }
+                         }
+                      }}
+                    />
                 </div>
                 <button onClick={() => setShowForgotModal(false)} className="w-full py-5 bg-neda-navy text-white rounded-2xl font-black uppercase tracking-widest shadow-lg">Done</button>
               </div>
