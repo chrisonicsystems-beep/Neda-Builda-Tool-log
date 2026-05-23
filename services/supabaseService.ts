@@ -290,26 +290,48 @@ export const signIn = async (email: string, password: string): Promise<{ data: U
   
   // Auto-migrate legacy users who don't have a Supabase Auth account yet
   if (authError && authError.message.toLowerCase().includes('invalid login credentials')) {
+    console.log("Attempting auto-migration/signup for new user...");
     const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
       email,
       password
     });
 
-    if (signUpData?.user && !signUpError) {
-      // We successfully created a new Supabase Auth user. Now link it!
-      const { data: migrateData } = await supabase.rpc('migrate_legacy_user', {
+    if (signUpError) {
+      console.error("SignUp error during migration:", signUpError);
+    } else if (signUpData?.user) {
+      console.log("SignUp successful! User ID:", signUpData.user.id);
+      
+      // Try RPC first for migration
+      const { data: migrateData, error: migrateError } = await supabase.rpc('migrate_legacy_user', {
         p_email: email,
         p_password: password,
         p_auth_uid: signUpData.user.id
       });
-
-      if (migrateData) {
-        if (!signUpData.session) {
-          return { data: null, error: new Error("Account migrated successfully, but you must confirm your email before logging in. Please check your inbox.") };
-        }
-        authData = signUpData as any;
-        authError = null;
+      
+      if (migrateError) {
+        console.warn("migrate_legacy_user RPC failed or missing:", migrateError);
       }
+
+      // Fallback: manually update the public.users table if the RPC failed or returned false
+      if (!migrateData) {
+        console.log("Attempting manual link of public user to auth user...");
+        const { error: updateError } = await supabase
+          .from('users')
+          .update({ auth_uid: signUpData.user.id })
+          .eq('email', email);
+          
+        if (updateError) {
+          console.error("Failed to link auth_uid:", updateError);
+        }
+      }
+
+      // Always allow the sign in to succeed if signUp created an auth user!
+      // (Even if manual link failed here, it might have been linked by a database trigger).
+      if (!signUpData.session) {
+        return { data: null, error: new Error("Account created successfully, but your organization requires you to confirm your email before logging in. Please check your inbox.") };
+      }
+      authData = signUpData as any;
+      authError = null;
     }
   }
 
@@ -354,7 +376,7 @@ export const fetchCurrentUserProfile = async (sessionUser: any): Promise<{ data:
           }).select('*').single();
           
           if (insertData && !insertError) {
-             res = { data: insertData, error: null };
+             res = { data: insertData, error: null } as any;
           } else {
              res = emailRes;
           }

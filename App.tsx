@@ -155,12 +155,13 @@ const App: React.FC = () => {
         if (session?.user?.id && (event === 'SIGNED_IN' || event === 'PASSWORD_RECOVERY')) {
           const profileResponse = await fetchCurrentUserProfile(session.user);
           if (profileResponse.data && profileResponse.data.isEnabled) {
+             const freshData = profileResponse.data;
              setCurrentUser(prev => {
                 // If we already have the user, just update it, otherwise set it fresh
                 if (prev) {
                    return { ...prev, mustChangePassword: event === 'PASSWORD_RECOVERY' || prev.mustChangePassword };
                 }
-                return { ...profileResponse.data, mustChangePassword: isRecovering || event === 'PASSWORD_RECOVERY' || profileResponse.data.mustChangePassword };
+                return { ...freshData, mustChangePassword: isRecovering || event === 'PASSWORD_RECOVERY' || freshData.mustChangePassword } as User;
              });
           } else if (!profileResponse.error || (profileResponse.data && !profileResponse.data.isEnabled)) {
              console.error("Auth state change: Profile invalid or not found", profileResponse.error);
