@@ -1314,9 +1314,7 @@ const ReturnToolModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (c
 const DatabaseFixModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const [copied, setCopied] = useState(false);
   
-  const sqlCommand = `BEGIN;
-
--- 1. Ensure required setup
+  const sqlCommand = `-- 1. Ensure required setup
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT false;
 
@@ -1424,9 +1422,7 @@ ALTER FUNCTION public.admin_create_staff(text, text, text, text, text) OWNER TO 
 ALTER FUNCTION public.update_own_profile(jsonb) OWNER TO postgres;
 
 -- 6. Flush schema cache
-NOTIFY pgrst, 'reload schema';
-
-COMMIT;`;
+NOTIFY pgrst, 'reload schema';`;
 
   const copyToClipboard = () => {
     navigator.clipboard.writeText(sqlCommand);
@@ -1452,7 +1448,7 @@ COMMIT;`;
         
         <div className="relative flex-grow min-h-0 bg-slate-900 rounded-xl overflow-hidden mb-6 flex flex-col">
           <div className="flex justify-between items-center p-3 bg-slate-800 text-slate-400 text-xs font-mono uppercase tracking-widest font-bold">
-            <span>Fix-RLS-v17.sql</span>
+            <span>Fix-RLS-v18.sql</span>
             <button 
               onClick={copyToClipboard}
               className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded cursor-pointer transition"
