@@ -5,7 +5,7 @@ import { Tool, User, ToolStatus } from '../types';
 // Memory lock to bypass navigator.locks in iframes without causing race conditions
 const memoryLocks = new Map<string, Promise<void>>();
 const dummyLock = async (name: string, acquireTimeout: number, fn: () => Promise<any>) => {
-  // Bypassing locks to prevent infinite hangs in the iframe preview environment
+  // Safe lock bypass for iframe preview
   return await fn();
 };
 
@@ -13,7 +13,7 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || import.meta.env.VITE_Su
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_Supabase_Anon_Key || (typeof process !== 'undefined' && process?.env?.SUPABASE_ANON_KEY);
 
 export const supabase = (supabaseUrl && supabaseAnonKey && supabaseUrl !== '' && supabaseAnonKey !== '') 
-  ? createClient(supabaseUrl, supabaseAnonKey, { auth: { lock: dummyLock, flowType: 'implicit' } }) 
+  ? createClient(supabaseUrl, supabaseAnonKey, { auth: { lock: dummyLock, flowType: 'pkce' } }) 
   : null;
 
 if (!supabase) {
