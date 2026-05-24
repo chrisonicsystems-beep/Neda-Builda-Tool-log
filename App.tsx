@@ -110,6 +110,7 @@ const App: React.FC = () => {
       }
 
       let finalUsers = (remoteUsers !== null) ? remoteUsers : INITIAL_USERS;
+      finalUsers = finalUsers.filter(u => !u.email.startsWith('deleted_'));
       let finalTools = (remoteTools !== null) ? remoteTools : INITIAL_TOOLS;
       
       if ((userRole === UserRole.ADMIN || currentUser?.role === UserRole.ADMIN) && finalUsers && finalUsers.length > 0) {
@@ -465,11 +466,11 @@ const App: React.FC = () => {
   };
 
   const handleDeleteUser = async (userToDelete: User) => {
-    if (!currentUser || !window.confirm(`Permanently remove ${userToDelete.name}?`)) return;
+    if (!currentUser) return;
     setIsSyncing(true);
     try {
-      await deleteSingleUser(userToDelete.id);
-      setAllUsers(prev => prev.filter(u => u.id !== userToDelete.id));
+      await deleteSingleUser(userToDelete.id, userToDelete.email);
+      setAllUsers(prev => prev.filter(u => u.id !== userToDelete.id && !u.email.startsWith('deleted_')));
       setSyncSuccess(`User removed.`);
     } catch (e: any) {
       setSyncError("Deletion Error: " + e.message);
@@ -1884,6 +1885,7 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
   const [assetSearch, setAssetSearch] = useState('');
   const [adminWarehouseFilter, setAdminWarehouseFilter] = useState<string | 'ALL'>('ALL');
   const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [deletingUser, setDeletingUser] = useState<User | null>(null);
   
   const bookedTools = useMemo(() => tools.filter((t: Tool) => t.status === ToolStatus.BOOKED_OUT), [tools]);
   const unhealthyToolsCount = useMemo(() => tools.filter((t: Tool) => (t.currentHolderName && !t.currentHolderId) || (t.currentHolderId && !t.currentHolderName)).length, [tools]);
@@ -1901,6 +1903,34 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
           onClose={() => setEditingUser(null)} 
           onSave={onUpdateUser} 
         />
+      )}
+      
+      {deletingUser && (
+        <div className="fixed inset-0 z-[700] bg-neda-navy/95 backdrop-blur-md flex items-center justify-center p-6 animate-in fade-in">
+          <div className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 shadow-2xl text-center">
+            <div className="bg-red-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6">
+              <Trash2 size={32} className="text-red-500" />
+            </div>
+            <h2 className="text-xl font-black text-neda-navy uppercase mb-2">Delete User</h2>
+            <p className="text-xs font-bold text-slate-500 mb-8 px-4 leading-relaxed">
+              Are you sure you want to permanently remove <strong className="text-neda-navy">{deletingUser.name}</strong> from the system?
+            </p>
+            <div className="grid grid-cols-2 gap-4">
+              <button onClick={() => setDeletingUser(null)} className="py-4 bg-slate-100 text-slate-500 hover:bg-slate-200 rounded-2xl font-black uppercase tracking-widest text-xs transition-colors">
+                Cancel
+              </button>
+              <button 
+                onClick={() => {
+                  onDeleteUser(deletingUser);
+                  setDeletingUser(null);
+                }} 
+                className="py-4 bg-red-500 text-white hover:bg-red-600 rounded-2xl font-black uppercase tracking-widest text-xs transition-colors shadow-lg shadow-red-500/20"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
       )}
       <div className="flex gap-4 border-b border-slate-100 pb-2 overflow-x-auto hide-scrollbar whitespace-nowrap">
         <button onClick={() => setActiveTab('USERS')} className={`pb-2 text-[10px] font-black uppercase tracking-widest ${activeTab === 'USERS' ? 'text-neda-orange border-b-2 border-neda-orange' : 'text-slate-400'}`}>Staff List</button>
@@ -1946,7 +1976,7 @@ const AdminDashboard: React.FC<any> = ({ tools, allUsers, onUpdateUser, onDelete
                       </button>
                     )}
                     {userRole === UserRole.ADMIN && user.id !== currentUserId && (
-                      <button onClick={() => onDeleteUser(user)} className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors">
+                      <button onClick={() => setDeletingUser(user)} className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors">
                         <Trash2 size={18} />
                       </button>
                     )}

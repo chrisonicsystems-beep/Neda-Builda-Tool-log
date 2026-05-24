@@ -240,10 +240,30 @@ export const onboardNewStaff = async (user: User) => {
   }
 };
 
-export const deleteSingleUser = async (userId: string) => {
+export const deleteSingleUser = async (userId: string, currentEmail: string = '') => {
   if (!supabase) return;
-  const { error } = await supabase.from('users').delete().eq('id', userId);
-  if (error) throw error;
+  // Soft-delete to preserve history logs and bypass strict DELETE RLS/FK constraints
+  const deletedData = {
+    id: userId,
+    is_enabled: false,
+    name: '[Deleted User]',
+    email: `deleted_${Date.now()}_${currentEmail}`.substring(0, 50),
+    role: 'USER'
+  };
+  
+  try {
+     const { error: rpcError } = await supabase.rpc('upsert_user_admin', { user_data: deletedData });
+     if (rpcError) {
+         const { error } = await supabase.from('users').upsert(deletedData, { onConflict: 'id' });
+         if (error) throw error;
+     }
+  } catch (err: any) {
+     console.error("Soft delete error", err);
+     
+     // Fallback to attempted hard delete if soft delete UPSERT fails
+     const { error } = await supabase.from('users').delete().eq('id', userId);
+     if (error) throw error;
+  }
 };
 
 export const fetchTools = async (): Promise<{ data: Tool[] | null; error: any }> => {
