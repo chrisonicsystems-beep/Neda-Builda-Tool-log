@@ -473,7 +473,12 @@ const App: React.FC = () => {
       setAllUsers(prev => prev.filter(u => u.id !== userToDelete.id && !u.email.startsWith('deleted_')));
       setSyncSuccess(`User removed.`);
     } catch (e: any) {
-      setSyncError("Deletion Error: " + e.message);
+      if (e.message && (e.message.includes('Database Repair') || e.message.includes('Permission denied'))) {
+        setShowDbFixModal(true);
+        setSyncError("Database configuration requires your attention to delete users.");
+      } else {
+        setSyncError("Deletion Error: " + e.message);
+      }
     } finally {
       setIsSyncing(false);
     }
@@ -1403,7 +1408,7 @@ BEGIN
   -- Ensure caller is updating their own profile OR is an Admin
   IF NOT EXISTS (
     SELECT 1 FROM public.users 
-    WHERE auth_uid = auth.uid() AND (role = 'ADMIN' OR id = (user_data->>'id')) AND is_enabled = true
+    WHERE auth_uid = auth.uid() AND (role = 'ADMIN' OR id = (user_data->>'id')::uuid) AND is_enabled = true
   ) THEN
     RAISE EXCEPTION 'Access denied. You can only update your own profile.';
   END IF;

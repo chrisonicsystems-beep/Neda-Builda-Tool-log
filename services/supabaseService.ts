@@ -242,7 +242,7 @@ export const onboardNewStaff = async (user: User) => {
 
 export const deleteSingleUser = async (userId: string, currentEmail: string = '') => {
   if (!supabase) return;
-  // Soft-delete to preserve history logs and bypass strict DELETE RLS/FK constraints
+  
   const deletedData = {
     id: userId,
     is_enabled: false,
@@ -252,17 +252,24 @@ export const deleteSingleUser = async (userId: string, currentEmail: string = ''
   };
   
   try {
-     const { error: rpcError } = await supabase.rpc('upsert_user_admin', { user_data: deletedData });
+     const { error: rpcError } = await supabase.rpc('update_own_profile', { user_data: deletedData });
      if (rpcError) {
-         const { error } = await supabase.from('users').upsert(deletedData, { onConflict: 'id' });
+         console.warn("Soft delete RPC failed, trying local update...", rpcError.message);
+         const { data, error } = await supabase.from('users').update(deletedData).eq('id', userId).select();
          if (error) throw error;
+         if (!data || data.length === 0) {
+           throw new Error("Permission denied or user not found. Could not soft-delete.");
+         }
      }
   } catch (err: any) {
      console.error("Soft delete error", err);
      
      // Fallback to attempted hard delete if soft delete UPSERT fails
-     const { error } = await supabase.from('users').delete().eq('id', userId);
+     const { data, error } = await supabase.from('users').delete().eq('id', userId).select();
      if (error) throw error;
+     if (!data || data.length === 0) {
+       throw new Error(`Permission denied: Could not delete user from database. Ask an Admin to run Database Repair.`);
+     }
   }
 };
 
