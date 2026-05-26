@@ -162,18 +162,20 @@ const App: React.FC = () => {
       const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
         if (event === 'PASSWORD_RECOVERY') {
           isRecovering = true;
+          sessionStorage.setItem('pw_recovery', 'true');
           setCurrentUser(prev => prev ? { ...prev, mustChangePassword: true } : prev);
         }
         
-        if (session?.user?.id && (event === 'SIGNED_IN' || event === 'PASSWORD_RECOVERY')) {
+        if (session?.user?.id && (event === 'SIGNED_IN' || event === 'PASSWORD_RECOVERY' || event === 'INITIAL_SESSION')) {
           const profileResponse = await fetchCurrentUserProfile(session.user);
           if (profileResponse.data && profileResponse.data.isEnabled) {
              const freshData = profileResponse.data;
              setCurrentUser(prev => {
+                const inRecovery = sessionStorage.getItem('pw_recovery') === 'true';
                 if (prev) {
-                   return { ...prev, mustChangePassword: event === 'PASSWORD_RECOVERY' || prev.mustChangePassword };
+                   return { ...prev, mustChangePassword: event === 'PASSWORD_RECOVERY' || inRecovery || freshData.mustChangePassword };
                 }
-                return { ...freshData, mustChangePassword: isRecovering || event === 'PASSWORD_RECOVERY' || freshData.mustChangePassword } as User;
+                return { ...freshData, mustChangePassword: isRecovering || event === 'PASSWORD_RECOVERY' || inRecovery || freshData.mustChangePassword } as User;
              });
              localStorage.setItem('et_user', JSON.stringify({ ...freshData, mustChangePassword: false }));
           } else if (!profileResponse.error || (profileResponse.data && !profileResponse.data.isEnabled)) {
@@ -198,6 +200,7 @@ const App: React.FC = () => {
         const hasRecoveryHash = window.location.hash.includes('type=recovery') || window.location.search.includes('type=recovery');
         if (hasRecoveryHash) {
           isRecovering = true;
+          sessionStorage.setItem('pw_recovery', 'true');
         }
         
         // Try memory cache first to provide immediate UI setup
@@ -405,6 +408,7 @@ const App: React.FC = () => {
         if (updatedUser.id === currentUser?.id) {
           const { error: authError } = await updateAuthPassword(updatedUser.password);
           if (authError) throw authError;
+          sessionStorage.removeItem('pw_recovery');
         } else {
           throw new Error("You cannot change another user's authentication password.");
         }
