@@ -409,7 +409,7 @@ const App: React.FC = () => {
           const { error: authError } = await updateAuthPassword(updatedUser.password);
           if (authError) throw authError;
           sessionStorage.removeItem('pw_recovery');
-        } else {
+        } else if (updatedUser.authUid) {
           throw new Error("You cannot change another user's authentication password.");
         }
       }
@@ -422,7 +422,12 @@ const App: React.FC = () => {
       setSyncSuccess(`User profile updated.`);
       setTimeout(() => setSyncSuccess(null), 3000);
     } catch (e: any) {
-      setSyncError("Update Failed: " + e.message);
+      if (e.message && e.message.includes('DB_MIGRATION_REQUIRED')) {
+        setShowDbFixModal(true);
+        setSyncError("Database configuration requires your attention.");
+      } else {
+        setSyncError("Update Failed: " + e.message);
+      }
     } finally {
       setIsSyncing(false);
     }
@@ -1412,7 +1417,7 @@ BEGIN
   -- Ensure caller is updating their own profile OR is an Admin
   IF NOT EXISTS (
     SELECT 1 FROM public.users 
-    WHERE auth_uid = auth.uid() AND (role = 'ADMIN' OR id = (user_data->>'id')::uuid) AND is_enabled = true
+    WHERE auth_uid = auth.uid() AND (role = 'ADMIN' OR id::text = (user_data->>'id')::text) AND is_enabled = true
   ) THEN
     RAISE EXCEPTION 'Access denied. You can only update your own profile.';
   END IF;

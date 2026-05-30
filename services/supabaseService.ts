@@ -210,7 +210,7 @@ export const upsertSingleUser = async (user: User) => {
     }
   } catch (err: any) {
     console.error("Supabase Upsert User Critical Error:", err);
-    if (err.message && err.message.toLowerCase().includes('violates row-level security policy')) {
+    if (err.message && (err.message.toLowerCase().includes('violates row-level security policy') || err.message.toLowerCase().includes('type uuid'))) {
        throw new Error(`DB_MIGRATION_REQUIRED`);
     }
     throw new Error(`Sync Error: ${err.message}`);
