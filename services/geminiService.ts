@@ -5,42 +5,47 @@ import { DEFAULT_WAREHOUSE } from "../constants";
 
 // Analyze tools using the text-focused model
 export const analyzeTools = async (tools: Tool[], query: string): Promise<string> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  
-  const toolSummary = tools.map(t => ({
-    name: t.name,
-    status: t.status,
-    category: t.category,
-    holder: t.currentHolderName || 'None',
-    site: t.currentSite || DEFAULT_WAREHOUSE,
-    lastAction: t.logs.length > 0 ? new Date(t.logs[t.logs.length-1].timestamp).toLocaleDateString() : 'N/A'
-  }));
-
-  const prompt = `
-    You are Pulse, an intelligent construction equipment coordinator.
-    
-    Inventory Data:
-    ${JSON.stringify(toolSummary, null, 2)}
-
-    Current User Query: "${query}"
-
-    Instructions:
-    1. Be professional, concise, and helpful.
-    2. STRICT RELEVANCE: Only provide information directly related to the items or equipment categories mentioned in the user query.
-    3. NO UNRELATED ADVICE: If an item is unavailable, do NOT list unrelated available equipment.
-    4. MAINTENANCE INSIGHTS: If relevant to the specific item asked about, mention its health or repair status.
-    5. Formulate your response as a direct answer followed by a brief "Maintenance Insight" or "Pulse Alert" if critical.
-  `;
-
   try {
+    // Also update to standard model and use GEMINI_API_KEY
+    const key = process.env.GEMINI_API_KEY || process.env.API_KEY || (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
+    if (!key) {
+      return "Missing Gemini API Key. Please add VITE_GEMINI_API_KEY to your environment variables.";
+    }
+    
+    const ai = new GoogleGenAI({ apiKey: key });
+    
+    const toolSummary = tools.map(t => ({
+      name: t.name,
+      status: t.status,
+      category: t.category,
+      holder: t.currentHolderName || 'None',
+      site: t.currentSite || DEFAULT_WAREHOUSE,
+    }));
+
+    const prompt = `
+      You are Pulse, an intelligent construction equipment coordinator.
+      
+      Inventory Data:
+      ${JSON.stringify(toolSummary, null, 2)}
+
+      Current User Query: "${query}"
+
+      Instructions:
+      1. Be professional, concise, and helpful.
+      2. STRICT RELEVANCE: Only provide information directly related to the items or equipment categories mentioned in the user query.
+      3. NO UNRELATED ADVICE: If an item is unavailable, do NOT list unrelated available equipment.
+      4. MAINTENANCE INSIGHTS: If relevant to the specific item asked about, mention its health or repair status.
+      5. Formulate your response as a direct answer followed by a brief "Maintenance Insight" or "Pulse Alert" if critical.
+    `;
+
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.5-flash',
       contents: prompt,
     });
     return response.text || "Sorry, I couldn't analyze the data right now.";
   } catch (error) {
     console.error("Gemini Analysis Error:", error);
-    return "The AI assistant is currently unavailable.";
+    return "The AI assistant is currently unavailable. Please check the API key and console logs.";
   }
 };
 
