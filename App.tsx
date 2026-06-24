@@ -53,6 +53,42 @@ const TEMP_PASSWORD_PREFIX = "NEDA-RESET-";
 const BIOMETRIC_KEY = "neda_biometric_link";
 const PHOTO_BUCKET = "tool-photos";
 
+const compressImage = (file: File, maxWidth = 800, maxHeight = 800): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width = Math.round((width * maxHeight) / height);
+            height = maxHeight;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', 0.7));
+      };
+      img.onerror = (err) => reject(err);
+    };
+    reader.onerror = (err) => reject(err);
+  });
+};
+
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [tools, setTools] = useState<Tool[]>([]);
@@ -166,7 +202,7 @@ const App: React.FC = () => {
           setCurrentUser(prev => prev ? { ...prev, mustChangePassword: true } : prev);
         }
         
-        if (session?.user?.id && (event === 'SIGNED_IN' || event === 'PASSWORD_RECOVERY' || event === 'INITIAL_SESSION')) {
+        if (session?.user?.id && (event === 'SIGNED_IN' || event === 'PASSWORD_RECOVERY')) {
           const profileResponse = await fetchCurrentUserProfile(session.user);
           if (profileResponse.data && profileResponse.data.isEnabled) {
              const freshData = profileResponse.data;
@@ -460,7 +496,11 @@ const App: React.FC = () => {
       let finalTool = { ...newTool };
       if (finalTool.mainPhoto && finalTool.mainPhoto.startsWith('data:')) {
         const publicUrl = await uploadFile(PHOTO_BUCKET, `tools/${finalTool.id}.png`, finalTool.mainPhoto);
-        if (publicUrl) finalTool.mainPhoto = publicUrl;
+        if (publicUrl) {
+          finalTool.mainPhoto = publicUrl;
+        } else {
+          throw new Error("Photo upload failed. Check Storage permissions.");
+        }
       }
       await upsertSingleTool(finalTool);
       setTools(prev => [...prev, finalTool]);
@@ -499,7 +539,11 @@ const App: React.FC = () => {
       let finalTool = { ...updatedTool };
       if (finalTool.mainPhoto && finalTool.mainPhoto.startsWith('data:')) {
         const publicUrl = await uploadFile(PHOTO_BUCKET, `tools/${finalTool.id}_${Date.now()}.png`, finalTool.mainPhoto);
-        if (publicUrl) finalTool.mainPhoto = publicUrl;
+        if (publicUrl) {
+          finalTool.mainPhoto = publicUrl;
+        } else {
+          throw new Error("Photo upload failed. Check Storage permissions.");
+        }
       }
       await upsertSingleTool(finalTool);
       setTools(prev => prev.map(t => t.id === finalTool.id ? finalTool : t));
@@ -523,7 +567,11 @@ const App: React.FC = () => {
       if (photo && photo.startsWith('data:')) {
         const path = `logs/${returningTool.id}_${Date.now()}.png`;
         const uploadedUrl = await uploadFile(PHOTO_BUCKET, path, photo);
-        if (uploadedUrl) finalPhotoUrl = uploadedUrl;
+        if (uploadedUrl) {
+          finalPhotoUrl = uploadedUrl;
+        } else {
+          throw new Error("Photo upload failed. Check Storage permissions.");
+        }
       }
 
       const newLog: ToolLog = {
@@ -962,14 +1010,15 @@ const ToolDetailModal: React.FC<{ tool: Tool; onClose: () => void; onAddLog: (to
     setNewLog({ action: 'BOOK_OUT', comment: '', userId: currentUser.id });
   };
 
-  const handleUpdatePhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleUpdatePhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        onUpdateTool({ ...tool, mainPhoto: reader.result as string });
-      };
-      reader.readAsDataURL(file);
+      try {
+        const compressedBase64 = await compressImage(file);
+        onUpdateTool({ ...tool, mainPhoto: compressedBase64 });
+      } catch (err) {
+        console.error("Failed to compress image", err);
+      }
     }
   };
 
@@ -1228,12 +1277,15 @@ const ReturnToolModal: React.FC<{ tool: Tool; onClose: () => void; onConfirm: (c
   const [photo, setPhoto] = useState<string | undefined>(undefined);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => setPhoto(reader.result as string);
-      reader.readAsDataURL(file);
+      try {
+        const compressedBase64 = await compressImage(file);
+        setPhoto(compressedBase64);
+      } catch (err) {
+        console.error("Failed to compress image", err);
+      }
     }
   };
 
@@ -1549,12 +1601,15 @@ const AddToolModal: React.FC<{ onClose: () => void; onSave: (t: Tool) => Promise
   const [localError, setLocalError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => setFormData({ ...formData, mainPhoto: reader.result as string });
-      reader.readAsDataURL(file);
+      try {
+        const compressedBase64 = await compressImage(file);
+        setFormData({ ...formData, mainPhoto: compressedBase64 });
+      } catch (err) {
+        console.error("Failed to compress image", err);
+      }
     }
   };
 

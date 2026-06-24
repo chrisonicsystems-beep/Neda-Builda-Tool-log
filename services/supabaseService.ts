@@ -38,10 +38,7 @@ const fetchWithRetry = async <T>(
   let lastError: any;
   for (let i = 0; i < retries; i++) {
     try {
-      const result = await Promise.race([
-        fetchFn(),
-        new Promise<any>((_, reject) => setTimeout(() => reject(new Error("Request timed out (preventing iframe hang)")), 15000))
-      ]);
+      const result = await fetchFn();
       if (!result?.error) return result;
       lastError = result.error;
       
@@ -406,6 +403,10 @@ export const fetchCurrentUserProfile = async (sessionUser: any): Promise<{ data:
 
   const result = await fetchWithRetry<any>(async () => {
     let res = await supabase.from('users').select('*').eq('auth_uid', authUid).maybeSingle();
+    
+    if (res.error) {
+       return res as any;
+    }
     
     // Fallback: If not found by auth_uid, try finding by email
     if (!res.data && email) {
