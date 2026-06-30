@@ -479,7 +479,7 @@ const App: React.FC = () => {
       setSyncSuccess(`Staff member added.`);
       setShowAddUser(false);
     } catch (e: any) {
-      if (e.message && (e.message.includes('DB_MIGRATION_REQUIRED') || e.message.includes('must_change_password') || e.message.includes('find the function upsert_user_admin') || e.message.includes('type uuid'))) {
+      if (e.message && (e.message.includes('DB_MIGRATION_REQUIRED') || e.message.includes('must_change_password') || e.message.includes('find the function upsert_user_admin') || e.message.includes('type uuid') || e.message.includes('provider_id'))) {
         setShowDbFixModal(true);
         throw new Error('Database configuration requires your attention.');
       }
@@ -1430,9 +1430,9 @@ BEGIN
     );
 
     INSERT INTO auth.identities (
-       id, user_id, identity_data, provider, last_sign_in_at, created_at, updated_at
+       id, user_id, provider_id, identity_data, provider, last_sign_in_at, created_at, updated_at
     ) VALUES (
-       gen_random_uuid(), v_user_id, format('{"sub":"%s"}', v_user_id)::jsonb, 'email', now(), now(), now()
+       gen_random_uuid(), v_user_id, v_user_id::text, format('{"sub":"%s"}', v_user_id)::jsonb, 'email', now(), now(), now()
     );
   ELSE
     -- ALWAYS override the password to the requested one if the account already exists, 
