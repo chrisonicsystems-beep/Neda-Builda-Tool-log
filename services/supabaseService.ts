@@ -219,11 +219,15 @@ export const upsertSingleUser = async (user: User) => {
 export const onboardNewStaff = async (user: User) => {
   if (!supabase) return;
   
+  if (!user.password || !user.password.trim()) {
+    throw new Error('A temporary password is required to onboard staff.');
+  }
+
   console.log("Onboarding new staff via SQL Direct RPC API...", user.email);
 
   const { data, error } = await supabase.rpc('admin_create_staff', {
     new_email: user.email.toLowerCase().trim(),
-    new_password: user.password || 'Password123',
+    new_password: user.password,
     new_name: user.name,
     new_role: user.role,
     new_id: user.id
@@ -327,19 +331,6 @@ export const signIn = async (email: string, password: string): Promise<{ data: U
     supabase.auth.signInWithPassword({ email, password }),
     new Promise<any>((resolve) => setTimeout(() => resolve({ data: null, error: new Error('Request timed out (preventing iframe hang)') }), 15000))
   ]);
-
-  // If login succeeded, try to auto-link the legacy table just in case they were unlinked
-  if (authData?.user && !authError) {
-    try {
-      await supabase.rpc('migrate_legacy_user', {
-        p_email: email,
-        p_password: password,
-        p_auth_uid: authData.user.id
-      });
-    } catch (e) {
-      console.warn("Soft migration failed on signin", e);
-    }
-  }
   
   // Auto-migrate legacy users who don't have a Supabase Auth account yet
   if (authError && authError.message.toLowerCase().includes('invalid login credentials')) {
@@ -353,30 +344,6 @@ export const signIn = async (email: string, password: string): Promise<{ data: U
       console.error("SignUp error during migration:", signUpError);
     } else if (signUpData?.user) {
       console.log("SignUp successful! User ID:", signUpData.user.id);
-      
-      // Try RPC first for migration
-      const { data: migrateData, error: migrateError } = await supabase.rpc('migrate_legacy_user', {
-        p_email: email,
-        p_password: password,
-        p_auth_uid: signUpData.user.id
-      });
-      
-      if (migrateError) {
-        console.warn("migrate_legacy_user RPC failed or missing:", migrateError);
-      }
-
-      // Fallback: manually update the public.users table if the RPC failed or returned false
-      if (!migrateData) {
-        console.log("Attempting manual link of public user to auth user...");
-        const { error: updateError } = await supabase
-          .from('users')
-          .update({ auth_uid: signUpData.user.id })
-          .eq('email', email);
-          
-        if (updateError) {
-          console.error("Failed to link auth_uid:", updateError);
-        }
-      }
 
       // Always allow the sign in to succeed if signUp created an auth user!
       // (Even if manual link failed here, it might have been linked by a database trigger).

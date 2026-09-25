@@ -1553,12 +1553,20 @@ NOTIFY pgrst, 'reload schema';`;
 };
 
 const AddUserModal: React.FC<{ onClose: () => void; onSave: (u: User) => Promise<void> }> = ({ onClose, onSave }) => {
-  const [formData, setFormData] = useState({ name: '', email: '', password: 'Password123', role: UserRole.USER });
+  const [formData, setFormData] = useState({ name: '', email: '', password: '', role: UserRole.USER });
   const [localError, setLocalError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!formData.password || formData.password.length < 8) {
+      setLocalError('Password must be at least 8 characters long.');
+      return;
+    }
+    if (formData.password.trim().toLowerCase() === 'password123') {
+      setLocalError('Password cannot be "Password123". Please set a secure temporary password.');
+      return;
+    }
     setIsSaving(true);
     setLocalError(null);
     try {
@@ -1577,6 +1585,7 @@ const AddUserModal: React.FC<{ onClose: () => void; onSave: (u: User) => Promise
         <form onSubmit={handleSubmit} className="space-y-4">
           <input required className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm" placeholder="Full Name" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
           <input required type="email" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm" placeholder="Email Address" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} />
+          <input required type="password" minLength={8} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm" placeholder="Temporary Password" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} />
           <select className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-sm" value={formData.role} onChange={e => setFormData({...formData, role: e.target.value as UserRole})}>
             <option value={UserRole.USER}>User</option>
             <option value={UserRole.MANAGER}>Manager</option>
@@ -1585,8 +1594,7 @@ const AddUserModal: React.FC<{ onClose: () => void; onSave: (u: User) => Promise
           <div className="p-4 bg-slate-50 border border-slate-100 rounded-2xl flex items-start gap-3">
             <Info size={16} className="text-neda-orange shrink-0 mt-0.5" />
             <p className="text-[10px] font-bold text-slate-500 leading-relaxed tracking-wide">
-              <span className="uppercase">NEW STAFF ARE GIVEN THE DEFAULT ACCESS KEY:</span> <span className="font-black text-neda-navy">Password123</span><br />
-              <span className="uppercase text-slate-400">Passwords are case-sensitive. They will be required to change it on their first login.</span>
+              <span className="uppercase">The admin must set a temporary password, which the staff member will be asked to change on first login.</span>
             </p>
           </div>
           {localError && <div className="text-red-500 text-xs font-bold text-center mt-2">{localError}</div>}
@@ -1763,17 +1771,8 @@ const LoginScreen: React.FC<any> = ({ onLogin, onForgotPassword, onBiometricLogi
       const { data: userProfile, error: signInError } = await signIn(email.trim(), password);
       
       if (signInError || !userProfile) {
-        // Fallback for biometric / legacy users without auth_uid
-        // Note: Production environments should migrate all users to Supabase Auth.
-        // We do a final fallback here to not lock anyone out if they haven't migrated completely.
-        const legacyUser = users.find((u: User) => u.email.toLowerCase() === email.trim().toLowerCase());
-        if (legacyUser && legacyUser.password === password) {
-          // Temporarily allow local-only login without auth_uid
-          await onLogin(legacyUser, rememberMe);
-        } else {
-          setError(signInError?.message || 'Invalid Credentials.');
-        }
-      } else if (userProfile) {
+        setError(signInError?.message || 'Invalid Credentials.');
+      } else {
         await onLogin(userProfile, rememberMe);
       }
     } catch (err: any) {

@@ -8,7 +8,6 @@ export const INITIAL_USERS: User[] = [
     name: 'Chrisonic Systems', 
     role: UserRole.ADMIN, 
     email: 'chrisonicsystems@gmail.com', 
-    password: 'password123',
     isEnabled: true 
   },
   { 
@@ -16,7 +15,6 @@ export const INITIAL_USERS: User[] = [
     name: 'Karin Admin', 
     role: UserRole.ADMIN, 
     email: 'karin@nedabuilda.com', 
-    password: 'password123',
     isEnabled: true 
   },
   { 
@@ -24,7 +22,6 @@ export const INITIAL_USERS: User[] = [
     name: 'Gavin Builder', 
     role: UserRole.USER, 
     email: 'gavin@nedabuilda.com', 
-    password: 'password123',
     isEnabled: true 
   },
   { 
@@ -32,7 +29,6 @@ export const INITIAL_USERS: User[] = [
     name: 'Bob Manager', 
     role: UserRole.MANAGER, 
     email: 'bob@nedabuilda.com', 
-    password: 'password123',
     isEnabled: true 
   },
   { 
@@ -40,7 +36,6 @@ export const INITIAL_USERS: User[] = [
     name: 'Sarah Site', 
     role: UserRole.USER, 
     email: 'sarah@nedabuilda.com', 
-    password: 'password123',
     isEnabled: true 
   },
 ];
