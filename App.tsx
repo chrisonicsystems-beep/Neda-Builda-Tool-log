@@ -1,4 +1,6 @@
 
+// Update banner test – 25 Sep 2026
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Tool, ToolStatus, User, UserRole, View, ToolLog } from './types';
 import { INITIAL_USERS, INITIAL_TOOLS } from './mockData';
