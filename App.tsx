@@ -89,12 +89,25 @@ const compressImage = (file: File, maxWidth = 800, maxHeight = 800): Promise<str
   });
 };
 
+const UpdateBanner: React.FC = () => (
+  <div className="sticky top-0 z-[1100] w-full bg-neda-navy text-white px-4 py-2.5 shadow-md flex items-center justify-center gap-3 text-xs border-b border-white/10">
+    <span className="font-bold text-[11px] sm:text-xs text-center">A new version of Tool Log is available</span>
+    <button
+      onClick={() => window.location.reload()}
+      className="px-3 py-1 bg-neda-orange hover:bg-orange-600 text-white rounded-lg font-black uppercase text-[10px] tracking-wider transition-colors shrink-0 cursor-pointer shadow-sm"
+    >
+      Update now
+    </button>
+  </div>
+);
+
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [tools, setTools] = useState<Tool[]>([]);
   const [allUsers, setAllUsers] = useState<User[]>([]);
   const [view, setView] = useState('INVENTORY') as any;
   const [isInitializing, setIsInitializing] = useState(true);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncSuccess, setSyncSuccess] = useState<string | null>(null);
@@ -305,6 +318,37 @@ const App: React.FC = () => {
 
     return () => {
       if (authSub) authSub.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    const checkVersion = async () => {
+      try {
+        const res = await fetch(`/version.json?t=${Date.now()}`, { cache: 'no-store' });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data?.version && typeof __APP_VERSION__ !== 'undefined' && data.version !== __APP_VERSION__) {
+          setUpdateAvailable(true);
+        }
+      } catch (err) {
+        // Ignore errors silently, for example when offline
+      }
+    };
+
+    checkVersion();
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        checkVersion();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    const interval = setInterval(checkVersion, 10 * 60 * 1000);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      clearInterval(interval);
     };
   }, []);
 
@@ -721,6 +765,7 @@ const App: React.FC = () => {
 
   if (isInitializing) return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 p-6 text-center">
+      {updateAvailable && <UpdateBanner />}
       <NedaLogo size={48} className="mb-6 animate-pulse opacity-20" />
       <Loader2 className="w-8 h-8 animate-spin text-neda-navy mb-4" />
       <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Connecting to Neda Cloud...</p>
@@ -729,6 +774,7 @@ const App: React.FC = () => {
 
   if (!currentUser) return (
     <>
+      {updateAvailable && <UpdateBanner />}
       <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[100] w-full max-w-xs px-4 pointer-events-none">
         {syncError && (
           <div className="bg-red-500 text-white px-4 py-3 rounded-2xl shadow-xl flex items-center gap-3 animate-in slide-in-from-top-4 pointer-events-auto">
@@ -760,6 +806,7 @@ const App: React.FC = () => {
   if (adminLinkBroken && currentUser?.role === UserRole.ADMIN) {
     return (
       <div className="min-h-screen bg-neda-navy flex flex-col items-center justify-center p-6 text-center text-white">
+        {updateAvailable && <UpdateBanner />}
         <div className="w-full max-w-[480px] bg-white text-neda-navy rounded-[3.5rem] p-10 shadow-2xl flex flex-col items-center">
           <div className="bg-red-100 w-16 h-16 rounded-full flex items-center justify-center mb-6">
             <ShieldAlert size={32} className="text-red-600" />
@@ -783,11 +830,13 @@ const App: React.FC = () => {
   }
 
   return (
-    <Layout 
-      activeView={view} 
-      setView={setView} 
-      userRole={currentUser.role} 
-      onLogout={handleLogout}
+    <>
+      {updateAvailable && <UpdateBanner />}
+      <Layout 
+        activeView={view} 
+        setView={setView} 
+        userRole={currentUser.role} 
+        onLogout={handleLogout}
       onRefresh={handleManualRefresh}
       isSyncing={isSyncing}
     >
@@ -903,6 +952,7 @@ const App: React.FC = () => {
         />
       )}
     </Layout>
+    </>
   );
 };
 

@@ -1,4 +1,8 @@
 
+declare global {
+  const __APP_VERSION__: string;
+}
+
 export enum ToolStatus {
   AVAILABLE = 'AVAILABLE',
   BOOKED_OUT = 'BOOKED_OUT',
