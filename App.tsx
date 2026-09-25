@@ -195,33 +195,36 @@ const App: React.FC = () => {
     let authSub: any;
 
     if (supabase) {
-      const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
-        if (event === 'PASSWORD_RECOVERY') {
-          isRecovering = true;
-          sessionStorage.setItem('pw_recovery', 'true');
-          setCurrentUser(prev => prev ? { ...prev, mustChangePassword: true } : prev);
-        }
-        
-        if (session?.user?.id && (event === 'SIGNED_IN' || event === 'PASSWORD_RECOVERY')) {
-          const profileResponse = await fetchCurrentUserProfile(session.user);
-          if (profileResponse.data && profileResponse.data.isEnabled) {
-             const freshData = profileResponse.data;
-             setCurrentUser(prev => {
-                const inRecovery = sessionStorage.getItem('pw_recovery') === 'true';
-                if (prev) {
-                   return { ...prev, mustChangePassword: event === 'PASSWORD_RECOVERY' || inRecovery || freshData.mustChangePassword };
-                }
-                return { ...freshData, mustChangePassword: isRecovering || event === 'PASSWORD_RECOVERY' || inRecovery || freshData.mustChangePassword } as User;
-             });
-             localStorage.setItem('et_user', JSON.stringify({ ...freshData, mustChangePassword: false }));
-          } else if (!profileResponse.error || (profileResponse.data && !profileResponse.data.isEnabled)) {
-             console.error("Auth state change: Profile invalid or not found", profileResponse.error);
-             setSyncError("Your account could not be found or is disabled.");
-             await signOut();
-          } else {
-             console.error("Auth state change: Network error fetching profile", profileResponse.error);
+      // Supabase calls must not be awaited inside onAuthStateChange because it deadlocks the client
+      const { data } = supabase.auth.onAuthStateChange((event, session) => {
+        setTimeout(async () => {
+          if (event === 'PASSWORD_RECOVERY') {
+            isRecovering = true;
+            sessionStorage.setItem('pw_recovery', 'true');
+            setCurrentUser(prev => prev ? { ...prev, mustChangePassword: true } : prev);
           }
-        }
+          
+          if (session?.user?.id && (event === 'SIGNED_IN' || event === 'PASSWORD_RECOVERY')) {
+            const profileResponse = await fetchCurrentUserProfile(session.user);
+            if (profileResponse.data && profileResponse.data.isEnabled) {
+               const freshData = profileResponse.data;
+               setCurrentUser(prev => {
+                  const inRecovery = sessionStorage.getItem('pw_recovery') === 'true';
+                  if (prev) {
+                     return { ...prev, mustChangePassword: event === 'PASSWORD_RECOVERY' || inRecovery || freshData.mustChangePassword };
+                  }
+                  return { ...freshData, mustChangePassword: isRecovering || event === 'PASSWORD_RECOVERY' || inRecovery || freshData.mustChangePassword } as User;
+               });
+               localStorage.setItem('et_user', JSON.stringify({ ...freshData, mustChangePassword: false }));
+            } else if (!profileResponse.error || (profileResponse.data && !profileResponse.data.isEnabled)) {
+               console.error("Auth state change: Profile invalid or not found", profileResponse.error);
+               setSyncError("Your account could not be found or is disabled.");
+               await signOut();
+            } else {
+               console.error("Auth state change: Network error fetching profile", profileResponse.error);
+            }
+          }
+        }, 0);
       });
       authSub = data.subscription;
     }
@@ -308,11 +311,21 @@ const App: React.FC = () => {
   const handleManualRefresh = async () => {
     setIsSyncing(true);
     setSyncError(null);
-    await loadData();
-    setIsSyncing(false);
-    if (!syncError) {
-      setSyncSuccess("Inventory Refreshed");
-      setTimeout(() => setSyncSuccess(null), 2000);
+    try {
+      const timeoutPromise = new Promise<'timeout'>((resolve) =>
+        setTimeout(() => resolve('timeout'), 20000)
+      );
+      const result = await Promise.race([loadData(), timeoutPromise]);
+      if (result === 'timeout') {
+        setSyncError('Refresh is taking too long. Please check your connection and try again.');
+      } else {
+        setSyncSuccess("Inventory Refreshed");
+        setTimeout(() => setSyncSuccess(null), 2000);
+      }
+    } catch (err) {
+      console.error("Manual refresh error:", err);
+    } finally {
+      setIsSyncing(false);
     }
   };
 
